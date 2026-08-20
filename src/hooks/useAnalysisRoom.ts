@@ -40,12 +40,26 @@ interface PeerSlot {
   pendingIce: RTCIceCandidateInit[];
   remoteReady: boolean;
   makingOffer: boolean;
+  pendingOffer: boolean;
   audioEl: HTMLAudioElement;
   audioSender: RTCRtpSender | null;
   videoSender: RTCRtpSender | null;
 }
 
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+
+function preferH264(transceiver: RTCRtpTransceiver) {
+  const caps = RTCRtpSender.getCapabilities?.("video");
+  if (!caps?.codecs.length || !transceiver.setCodecPreferences) return;
+  const h264 = caps.codecs.filter((codec) => /H264/i.test(codec.mimeType));
+  const rest = caps.codecs.filter((codec) => !/H264/i.test(codec.mimeType));
+  if (!h264.length) return;
+  try {
+    transceiver.setCodecPreferences([...h264, ...rest]);
+  } catch {
+    // Safari antigo pode recusar a ordem.
+  }
+}
 
 async function playVideo(video: HTMLVideoElement | null, stream: MediaStream | null) {
   if (!video) return;
@@ -140,25 +154,16 @@ export function useAnalysisRoom({
 
   const addLocalTracks = useCallback((pc: RTCPeerConnection) => {
     const slot = Array.from(peersRef.current.values()).find((item) => item.pc === pc);
+    if (!slot) return;
     const audio = audioStreamRef.current;
     const audioTrack = audio?.getAudioTracks().find((track) => track.readyState === "live");
-    if (audio && audioTrack && isMicOnRef.current) {
-      if (slot?.audioSender) {
-        void slot.audioSender.replaceTrack(audioTrack);
-      } else {
-        const sender = pc.addTrack(audioTrack, audio);
-        if (slot) slot.audioSender = sender;
-      }
+    if (audioTrack && isMicOnRef.current) {
+      void slot.audioSender?.replaceTrack(audioTrack);
     }
     const screen = screenStreamRef.current;
-    const videoTrack = screen?.getVideoTracks().find((track) => track.readyState === "live");
-    if (screen && videoTrack) {
-      if (slot?.videoSender) {
-        void slot.videoSender.replaceTrack(videoTrack);
-      } else {
-        const sender = pc.addTrack(videoTrack, screen);
-        if (slot) slot.videoSender = sender;
-      }
+    const videoTrack = screen?.getVideoTracks().find((track) => track.readyState !== "ended");
+    if (videoTrack) {
+      void slot.videoSender?.replaceTrack(videoTrack);
     }
   }, []);
 
@@ -166,16 +171,24 @@ export function useAnalysisRoom({
     async (remoteId: string) => {
       const slot = peersRef.current.get(remoteId);
       if (!slot || !socket) return;
+      slot.pendingOffer = true;
       if (slot.pc.signalingState !== "stable") return;
+      slot.pendingOffer = false;
       slot.makingOffer = true;
       try {
         const offer = await slot.pc.createOffer();
+        if (slot.pc.signalingState !== "stable") {
+          slot.pendingOffer = true;
+          return;
+        }
         await slot.pc.setLocalDescription(offer);
         socket.emit("webrtc-offer", {
           analysisId: channelId,
           targetUserId: remoteId,
           sdp: slot.pc.localDescription,
         });
+      } catch {
+        slot.pendingOffer = true;
       } finally {
         slot.makingOffer = false;
       }
@@ -204,11 +217,18 @@ export function useAnalysisRoom({
         pendingIce: [],
         remoteReady: false,
         makingOffer: false,
+        pendingOffer: false,
         audioEl,
         audioSender: null,
         videoSender: null,
       };
       peersRef.current.set(remoteId, slot);
+
+      const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+      const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+      slot.audioSender = audioTransceiver.sender;
+      slot.videoSender = videoTransceiver.sender;
+      preferH264(videoTransceiver);
       addLocalTracks(pc);
 
       pc.onicecandidate = (event) => {
@@ -221,18 +241,32 @@ export function useAnalysisRoom({
         }
       };
 
+      const applyRemoteVideo = (track: MediaStreamTrack, stream: MediaStream) => {
+        void playVideo(remoteVideoRef.current, stream);
+        setHasRemoteStream(true);
+        setRemoteStream(stream);
+        track.addEventListener("ended", () => {
+          if (track.readyState === "live") return;
+          setHasRemoteStream(false);
+          setRemoteStream((current) => (current && current.getVideoTracks().includes(track) ? null : current));
+          void playVideo(remoteVideoRef.current, null);
+        });
+      };
+
       pc.ontrack = (event) => {
         const stream =
           event.streams[0] ?? new MediaStream(event.track ? [event.track] : []);
         if (event.track.kind === "video") {
-          void playVideo(remoteVideoRef.current, stream);
-          setHasRemoteStream(true);
-          setRemoteStream(stream);
-          event.track.addEventListener("ended", () => {
-            setHasRemoteStream(false);
-            setRemoteStream(null);
-            void playVideo(remoteVideoRef.current, null);
+          const apply = () => applyRemoteVideo(event.track, stream);
+          event.track.addEventListener("unmute", apply);
+          event.track.addEventListener("mute", () => {
+            void playVideo(remoteVideoRef.current, stream);
           });
+          if (!event.track.muted) apply();
+          else {
+            setRemoteStream(stream);
+            void playVideo(remoteVideoRef.current, stream);
+          }
           return;
         }
         slot.audioEl.srcObject = stream;
@@ -241,6 +275,11 @@ export function useAnalysisRoom({
 
       pc.onnegotiationneeded = () => {
         void offerTo(remoteId);
+      };
+      pc.onsignalingstatechange = () => {
+        if (pc.signalingState === "stable" && slot.pendingOffer) {
+          void offerTo(remoteId);
+        }
       };
 
       return slot;
@@ -704,6 +743,14 @@ export function useAnalysisRoom({
   }, [ensureAudioContext]);
 
   const clearError = useCallback(() => setError(null), []);
+  const clearShareHint = useCallback(() => setShareHint(null), []);
+  const reportShareError = useCallback((error: unknown) => {
+    if (shouldUpgradeToHttps()) {
+      upgradeToHttps("share");
+      return;
+    }
+    setShareHint(describeShareError(error));
+  }, []);
 
   const stopScreenShare = useCallback(async () => {
     unwatchDisplayRef.current?.();
@@ -725,15 +772,13 @@ export function useAnalysisRoom({
     socketRef.current?.emit("screen-share-stop", { analysisId: channelIdRef.current });
   }, []);
 
-  const startScreenShare = useCallback(async () => {
+  const startScreenShare = useCallback(async (existingStream?: MediaStream) => {
     if (!canShareScreen) return false;
-    if (shouldUpgradeToHttps()) {
-      upgradeToHttps("share");
-      return false;
-    }
     try {
-      const stream = await captureDisplay();
-      const videoTrack = stream.getVideoTracks().find((track) => track.readyState === "live");
+      const stream = existingStream ?? (await captureDisplay());
+      const videoTrack =
+        stream.getVideoTracks().find((track) => track.readyState !== "ended") ??
+        stream.getVideoTracks()[0];
       if (!videoTrack) {
         stream.getTracks().forEach((track) => track.stop());
         setShareHint("Não foi possível capturar a tela.");
@@ -748,21 +793,30 @@ export function useAnalysisRoom({
       setShareHint(null);
       setError(null);
 
-      unwatchDisplayRef.current = watchDisplayCaptureEnd(stream, () => {
+      const endShare = () => {
         void stopScreenShare();
-      });
+      };
+      videoTrack.onended = endShare;
+      unwatchDisplayRef.current = watchDisplayCaptureEnd(stream, endShare);
 
       await playVideo(localVideoRef.current, stream);
       socketRef.current?.emit("screen-share-start", { analysisId: channelIdRef.current });
 
-      for (const [remoteId, slot] of peersRef.current) {
-        if (slot.videoSender) {
-          await slot.videoSender.replaceTrack(videoTrack);
-        } else {
+      const sendVideo = async () => {
+        for (const [remoteId, slot] of peersRef.current) {
+          if (slot.videoSender) {
+            await slot.videoSender.replaceTrack(videoTrack);
+            continue;
+          }
           slot.videoSender = slot.pc.addTrack(videoTrack, stream);
           void offerTo(remoteId);
         }
-      }
+      };
+      await sendVideo();
+      videoTrack.addEventListener("unmute", () => {
+        if (!isSharingRef.current) return;
+        void sendVideo();
+      });
 
       try {
         const lock = await navigator.wakeLock?.request("screen");
@@ -916,6 +970,8 @@ export function useAnalysisRoom({
     toggleMic,
     unlockAudio,
     clearError,
+    clearShareHint,
+    reportShareError,
     leaveRoom,
     kickParticipant,
     endAnalysis,

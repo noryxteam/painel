@@ -211,7 +211,7 @@ function ScreenShareTile({
           autoPlay
           muted
           playsInline
-          className={cn("h-full w-full", videoFit)}
+          className="pointer-events-none absolute h-0 w-0 opacity-0"
         />
       ) : (
         <video
@@ -221,14 +221,16 @@ function ScreenShareTile({
           muted={!watching}
           className={cn(
             "h-full w-full",
-            watching || self || expanded ? videoFit : "scale-105 object-cover",
+            watching || expanded ? videoFit : "scale-105 object-cover",
           )}
         />
       )}
       {self && (
-        <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-3 text-center text-sm font-semibold leading-snug text-white">
-          Você está compartilhando sua tela!
-        </p>
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#1e1f22]/70 backdrop-blur-md">
+          <p className="px-3 text-center text-sm font-semibold leading-snug text-white">
+            Você está transmitindo tela
+          </p>
+        </div>
       )}
       {!self && !watching && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#1e1f22]/60 backdrop-blur-md">
@@ -269,7 +271,7 @@ function ScreenShareTile({
           <span className="truncate">{name}</span>
         </span>
       )}
-      {onExpand && (
+      {onExpand && !self && (
         <button
           type="button"
           className="absolute bottom-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-md bg-black/70 text-white"
@@ -922,10 +924,15 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
       await session.stopScreenShare();
       return;
     }
-    const ok = await session.startScreenShare();
-    if (!ok) return;
-    setIsFullscreen(true);
-    showChrome(isMobile ? 30_000 : 2_000);
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+      await session.startScreenShare(stream);
+    } catch (error) {
+      session.reportShareError(error);
+    }
   };
 
   const enterRoom = (item: SidebarRoom) => {
@@ -1085,7 +1092,8 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.removedReason]);
 
-  const canWatch = session.hasRemoteStream && !session.isSharing;
+  const canWatch =
+    !session.isSharing && people.some((person) => person.isSharing && person.userId !== access.userId);
   const mobileShare = isMobile && inCall && (session.isSharing || canWatch);
   const showStream = !isMobile && (session.isSharing || canWatch);
   const showPip =
@@ -1301,20 +1309,28 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
           )}
           {askShare && (
             <div
-              className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
+              className="relative w-full max-w-md rounded-xl bg-black/80 px-4 py-3 pt-8 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
               onClick={(event) => event.stopPropagation()}
             >
+              <button
+                type="button"
+                className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md text-white/80"
+                aria-label="Fechar"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  session.clearShareHint();
+                  setWantShare(false);
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
               <p>{session.shareHint ?? "Toque para o celular pedir a transmissão de tela."}</p>
               <button
                 type="button"
                 className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
                 onClick={(event) => {
                   event.stopPropagation();
-                  void session.startScreenShare().then((ok) => {
-                    if (!ok) return;
-                    setIsFullscreen(true);
-                    showChrome(isMobile ? 30_000 : 2_000);
-                  });
+                  void shareScreen();
                 }}
               >
                 Transmitir tela
@@ -1462,11 +1478,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               autoPlay
               muted
               playsInline
-              className={
-                session.isSharing
-                  ? "h-full w-full bg-black object-contain"
-                  : "pointer-events-none absolute h-0 w-0 opacity-0"
-              }
+              className="pointer-events-none absolute h-0 w-0 opacity-0"
             />
             <video
               ref={session.remoteVideoRef}
@@ -1482,6 +1494,13 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                   : "pointer-events-none absolute h-0 w-0 opacity-0"
               }
             />
+            {session.isSharing && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#1e1f22]/70 backdrop-blur-md">
+                <p className="px-4 text-center text-base font-semibold text-white sm:text-lg">
+                  Você está transmitindo tela
+                </p>
+              </div>
+            )}
             {canWatch && (
               <>
                 {!isWatching && (

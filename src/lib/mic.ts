@@ -66,101 +66,30 @@ export async function captureMicrophone(inputDeviceId?: string) {
   throw last instanceof Error ? last : new Error("MIC_DENIED");
 }
 
-type DisplayCaptureFn = (options?: DisplayMediaStreamOptions) => Promise<MediaStream>;
-
-export function isIosWebkit() {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent || "";
-  if (/iPad|iPhone|iPod/.test(ua)) return true;
-  return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-}
-
-function resolveDisplayCapture(): DisplayCaptureFn | null {
-  const media = navigator.mediaDevices as
-    | (MediaDevices & {
-        webkitGetDisplayMedia?: DisplayCaptureFn;
-      })
-    | undefined;
-  const nav = navigator as Navigator & {
-    getDisplayMedia?: DisplayCaptureFn;
-    webkitGetDisplayMedia?: DisplayCaptureFn;
-  };
-  const candidates: Array<DisplayCaptureFn | undefined> = [
-    media?.getDisplayMedia?.bind(media),
-    media?.webkitGetDisplayMedia?.bind(media),
-    nav.getDisplayMedia?.bind(nav),
-    nav.webkitGetDisplayMedia?.bind(nav),
-  ];
-  return candidates.find((fn) => typeof fn === "function") ?? null;
-}
-
-export function canCaptureDisplay() {
-  return Boolean(window.isSecureContext && resolveDisplayCapture());
-}
-
-function displayCaptureOptions(): DisplayMediaStreamOptions[] {
-  const base: DisplayMediaStreamOptions[] = [{ video: true, audio: false }];
-  if (isIosWebkit()) {
-    base.push(
-      {
-        video: true,
-        audio: false,
-        preferCurrentTab: true,
-      } as DisplayMediaStreamOptions,
-      {
-        video: { displaySurface: "browser" },
-        audio: false,
-        preferCurrentTab: true,
-        selfBrowserSurface: "include",
-      } as DisplayMediaStreamOptions,
-    );
-  }
-  base.push({
-    video: {
-      frameRate: { ideal: 15, max: 30 },
-    },
-    audio: false,
-  });
-  return base;
-}
-
 export async function captureDisplay() {
   if (!window.isSecureContext) {
     throw new Error("INSECURE_CONTEXT");
   }
-
-  const invoke = async (options: DisplayMediaStreamOptions) => {
-    const resolved = resolveDisplayCapture();
-    if (resolved) return resolved(options);
-    const media = navigator.mediaDevices;
-    if (!media) throw new Error("DISPLAY_UNSUPPORTED");
-    return media.getDisplayMedia(options);
-  };
-
-  let last: unknown;
-  for (const options of displayCaptureOptions()) {
+  const media = navigator.mediaDevices;
+  if (!media) {
+    const error = new Error("MediaDevices unavailable");
+    error.name = "NotSupportedError";
+    throw error;
+  }
+  const stream = await media.getDisplayMedia({
+    video: true,
+    audio: false,
+  });
+  const videoTrack = stream.getVideoTracks()[0];
+  if (videoTrack) {
     try {
-      const stream = await invoke(options);
-      const videoTrack = stream.getVideoTracks()[0];
-      if (videoTrack) {
-        try {
-          videoTrack.contentHint = "detail";
-        } catch {
-          // Safari antigo pode não expor contentHint.
-        }
-      }
-      rememberMediaGranted({ share: true });
-      return stream;
-    } catch (error) {
-      const name = error instanceof Error ? error.name : "";
-      if (name === "NotAllowedError" || name === "AbortError") throw error;
-      if (name === "TypeError") {
-        throw new Error("DISPLAY_UNSUPPORTED");
-      }
-      last = error;
+      videoTrack.contentHint = "detail";
+    } catch {
+      // Alguns navegadores não expõem contentHint.
     }
   }
-  throw last instanceof Error ? last : new Error("DISPLAY_UNSUPPORTED");
+  rememberMediaGranted({ share: true });
+  return stream;
 }
 
 export function watchDisplayCaptureEnd(stream: MediaStream, onEnd: () => void) {
@@ -179,7 +108,6 @@ export function watchDisplayCaptureEnd(stream: MediaStream, onEnd: () => void) {
     track.addEventListener("ended", finish);
   }
   stream.addEventListener("inactive", finish);
-  (stream as MediaStream & { oninactive?: () => void }).oninactive = finish;
 
   return () => {
     finished = true;
@@ -211,26 +139,23 @@ export function describeShareError(error: unknown) {
   if (message === "INSECURE_CONTEXT") {
     return "Toque em Transmitir tela para o navegador pedir a captura em HTTPS.";
   }
-  if (message === "DISPLAY_UNSUPPORTED") {
-    if (isIosWebkit()) {
-      return "Este Safari/Chrome do iPhone ainda não expõe captura de tela para sites. Toque de novo em Transmitir tela — se o iOS abrir o seletor, a transmissão começa na hora. Assistir a tela de outra pessoa continua normal.";
-    }
-    return "Este navegador não oferece captura de tela. Toque de novo em Transmitir tela para tentar outra vez.";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    return "Toque em Permitir na janela do navegador para transmitir a tela.";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "Nenhuma tela foi encontrada para capturar.";
+  }
+  if (name === "AbortError") {
+    return "A captura de tela foi cancelada. Toque de novo em Transmitir tela.";
+  }
+  if (name === "NotSupportedError" || name === "TypeError") {
+    return "O navegador não iniciou a captura de tela nesta tentativa. Toque de novo em Transmitir tela.";
   }
   if (name === "InvalidStateError") {
-    return "O iOS só pede a tela no toque. Toque de novo em Transmitir tela.";
-  }
-  if (name === "NotFoundError") {
-    return "Nenhuma fonte de tela foi oferecida neste aparelho.";
+    return "Toque de novo em Transmitir tela para o navegador pedir a captura.";
   }
   if (name === "NotReadableError" || name === "TrackStartError") {
-    return "O iOS iniciou a captura, mas não conseguiu ler a tela. Pare a gravação no iOS e toque de novo.";
-  }
-  if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "AbortError") {
-    if (isIosWebkit()) {
-      return "O iOS não liberou a tela desta vez. Toque de novo em Transmitir tela para abrir o seletor.";
-    }
-    return "Toque em Permitir na janela do navegador para transmitir a tela.";
+    return "A captura começou, mas a tela não pôde ser lida. Pare e toque de novo em Transmitir tela.";
   }
   return "Toque em Transmitir tela para o navegador pedir a captura.";
 }
