@@ -23,6 +23,7 @@ import { AudioSettingsPanel, ControlButton } from "@/components/rooms/AudioSetti
 import { useAnalysisRoom } from "@/hooks/useAnalysisRoom";
 import { useSocket } from "@/hooks/useSocket";
 import { formatOccupancy } from "@/lib/format";
+import { httpsAppUrl, isInAppBrowser, isSecureMediaContext } from "@/lib/mic";
 import { isEmuRoom, isMobRoom, isSupRoom, roomTitle } from "@/lib/room-names";
 import { cn } from "@/lib/utils";
 
@@ -919,18 +920,34 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
             </div>
           )}
           {session.micHint && (
-            <div className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30">
+            <div
+              className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
+              onClick={(event) => event.stopPropagation()}
+            >
               <p>{session.micHint}</p>
-              <button
-                type="button"
-                className="mt-2 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black"
-                onClick={() => {
-                  session.unlockAudio();
-                  void session.enableMic();
+              <a
+                href={httpsAppUrl() || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (isSecureMediaContext() && !isInAppBrowser()) {
+                    event.preventDefault();
+                    session.unlockAudio();
+                    void session.enableMic();
+                  }
                 }}
               >
-                Ativar microfone
-              </button>
+                {isInAppBrowser() || !isSecureMediaContext()
+                  ? "Abrir no Safari e falar"
+                  : "Ativar microfone"}
+              </a>
+              {(isInAppBrowser() || !isSecureMediaContext()) && (
+                <p className="mt-2 text-[11px] text-zinc-400">
+                  Se o iPhone avisar que o site não é seguro, toque em Avançar e Visitar.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -952,7 +969,14 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
         initialRooms={initialRooms}
         isMicOn={session.isMicOn}
         isDeafened={session.isDeafened}
-        onMic={session.toggleMic}
+        onMic={() => {
+          if (!isSecureMediaContext() || isInAppBrowser()) {
+            window.open(httpsAppUrl(), "_blank", "noopener,noreferrer");
+            return;
+          }
+          session.unlockAudio();
+          void session.toggleMic();
+        }}
         onDeafen={session.toggleDeafen}
         onSelectRoom={enterRoom}
         audio={audio}
@@ -1109,7 +1133,17 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               : "relative gap-3 px-2 pb-[max(1rem,env(safe-area-inset-bottom))] sm:gap-8 sm:px-4 sm:pb-6",
           )}
         >
-          <ControlButton label="Microfone" onClick={session.toggleMic}>
+          <ControlButton
+            label="Microfone"
+            onClick={() => {
+              if (!isSecureMediaContext() || isInAppBrowser()) {
+                window.location.assign(httpsAppUrl());
+                return;
+              }
+              session.unlockAudio();
+              void session.toggleMic();
+            }}
+          >
             {session.isMicOn ? (
               <Mic className="h-6 w-6" />
             ) : (

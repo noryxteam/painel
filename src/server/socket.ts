@@ -1,4 +1,5 @@
 import type { Server as HTTPServer } from "http";
+import type { Server as HTTPSServer } from "https";
 import type { Socket, Server as SocketIOServer } from "socket.io";
 import { Server } from "socket.io";
 import {
@@ -83,7 +84,10 @@ async function emitToUser(
   target?.emit(event, payload);
 }
 
-export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
+export function initSocketServer(
+  httpServer: HTTPServer | HTTPSServer,
+  extraServer?: HTTPServer | HTTPSServer,
+): SocketIOServer {
   const io = new Server(httpServer, {
     path: "/api/socket",
     cors: {
@@ -91,6 +95,7 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
       methods: ["GET", "POST"],
     },
   });
+  if (extraServer) io.attach(extraServer);
   ioServer = io;
 
   io.on("connection", (socket: Socket) => {

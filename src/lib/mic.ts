@@ -7,6 +7,15 @@ export function isInAppBrowser() {
   return /WhatsApp|FBAN|FBAV|Instagram|Line\/|Twitter/i.test(navigator.userAgent);
 }
 
+export function httpsAppUrl() {
+  if (typeof window === "undefined") return "";
+  const { hostname, pathname, search, hash, protocol } = window.location;
+  if (protocol === "https:") return window.location.href;
+  const configured = process.env.NEXT_PUBLIC_HTTPS_PORT ?? "3443";
+  const port = configured === "443" ? "" : `:${configured}`;
+  return `https://${hostname}${port}${pathname}${search}${hash}`;
+}
+
 export async function captureMicrophone(inputDeviceId?: string) {
   const media = navigator.mediaDevices;
   if (!media?.getUserMedia) {
@@ -54,10 +63,10 @@ export function describeMicError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
 
   if (isInAppBrowser()) {
-    return "Abra o painel no Chrome. O WhatsApp bloqueia o microfone.";
+    return "O WhatsApp bloqueia o microfone. Toque abaixo para abrir no Safari.";
   }
   if (message === "INSECURE_CONTEXT" || !isSecureMediaContext()) {
-    return "No celular o microfone só funciona em HTTPS. Abra no Chrome, não no WhatsApp.";
+    return "O celular só libera o microfone em conexão segura. Toque abaixo para abrir.";
   }
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
     return "Toque em Permitir quando o celular pedir o microfone.";
@@ -66,7 +75,7 @@ export function describeMicError(error: unknown) {
     return "Nenhum microfone encontrado neste aparelho.";
   }
   if (name === "NotReadableError" || name === "TrackStartError") {
-    return "O microfone está em uso por outro app. Feche o app e toque no mic de novo.";
+    return "O microfone está em uso por outro app. Feche o app e tente de novo.";
   }
-  return "Toque no microfone e permita o acesso para falar na call.";
+  return "Toque abaixo e permita o microfone para falar na call.";
 }
