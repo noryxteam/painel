@@ -805,6 +805,11 @@ export function useAnalysisRoom({
     };
   }, []);
 
+  const attachMediaToVideos = useCallback(() => {
+    void playVideo(localVideoRef.current, screenStreamRef.current);
+    void playVideo(remoteVideoRef.current, remoteStream);
+  }, [remoteStream]);
+
   return {
     localVideoRef,
     remoteVideoRef,
@@ -833,5 +838,6 @@ export function useAnalysisRoom({
     isDeafened,
     toggleDeafen,
     updateAudioConfig,
+    attachMediaToVideos,
   };
 }

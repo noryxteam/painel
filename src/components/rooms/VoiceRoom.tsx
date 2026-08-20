@@ -14,11 +14,13 @@ import {
   MonitorOff,
   PhoneOff,
   Settings,
+  Smartphone,
   Sparkles,
   User,
   Volume2,
   Eye,
   EyeOff,
+  X,
 } from "lucide-react";
 import { AudioSettingsPanel, ControlButton } from "@/components/rooms/AudioSettings";
 import { useAnalysisRoom } from "@/hooks/useAnalysisRoom";
@@ -64,8 +66,9 @@ function memberId(person: { id?: string; userId?: string }) {
   return person.userId || person.id || "";
 }
 
-function participantGridClass(count: number, mobile = false) {
+function participantGridClass(count: number, mobile = false, compact = false) {
   if (mobile) {
+    if (compact || count >= 3) return "grid-cols-2";
     if (count <= 2) return "grid-cols-1";
     return "grid-cols-2";
   }
@@ -150,6 +153,104 @@ function MobileCallButton({
     >
       {children}
     </button>
+  );
+}
+
+function ScreenShareTile({
+  self,
+  watching,
+  name,
+  localVideoRef,
+  remoteVideoRef,
+  onWatch,
+  onStop,
+  onExpand,
+}: {
+  self: boolean;
+  watching: boolean;
+  name: string;
+  localVideoRef: React.RefObject<HTMLVideoElement | null>;
+  remoteVideoRef: React.RefObject<HTMLVideoElement | null>;
+  onWatch: () => void;
+  onStop?: () => void;
+  onExpand?: () => void;
+}) {
+  return (
+    <div className="relative h-full min-h-0 overflow-hidden rounded-2xl bg-black">
+      {self ? (
+        <video
+          ref={localVideoRef}
+          autoPlay
+          muted
+          playsInline
+          className="pointer-events-none absolute h-0 w-0 opacity-0"
+        />
+      ) : (
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          muted={!watching}
+          className={cn(
+            "h-full w-full",
+            watching ? "object-contain" : "scale-105 object-cover",
+          )}
+        />
+      )}
+      {self && (
+        <p className="absolute inset-0 flex items-center justify-center px-3 text-center text-sm font-semibold leading-snug text-white">
+          Você está compartilhando sua tela!
+        </p>
+      )}
+      {!self && !watching && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#1e1f22]/60 backdrop-blur-md">
+          <button
+            type="button"
+            className="rounded-lg bg-[#3f4147] px-3 py-2 text-xs font-medium text-white"
+            onClick={(event) => {
+              event.stopPropagation();
+              onWatch();
+            }}
+          >
+            Assista à transmissão
+          </button>
+        </div>
+      )}
+      {self && onStop && (
+        <button
+          type="button"
+          className="absolute left-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white"
+          aria-label="Parar de transmitir"
+          onClick={(event) => {
+            event.stopPropagation();
+            onStop();
+          }}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+      {onExpand && (
+        <button
+          type="button"
+          className="absolute right-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white"
+          aria-label="Tela cheia"
+          onClick={(event) => {
+            event.stopPropagation();
+            onExpand();
+          }}
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
+      )}
+      <span className="absolute bottom-2 left-1/2 z-20 flex max-w-[90%] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/80 px-2.5 py-1 text-[11px] font-medium text-white">
+        {self ? (
+          <Smartphone className="h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <Monitor className="h-3.5 w-3.5 shrink-0" />
+        )}
+        <span className="truncate">{name}</span>
+      </span>
+    </div>
   );
 }
 
@@ -622,6 +723,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   const isMobile = useIsMobile();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isWatching, setIsWatching] = useState(false);
+  const [streamFocus, setStreamFocus] = useState(false);
   const [chromeVisible, setChromeVisible] = useState(true);
   const chromeTimer = useRef(0);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
@@ -880,11 +982,14 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   }, [session.removedReason]);
 
   const canWatch = session.hasRemoteStream && !session.isSharing;
-  const showStream = session.isSharing || canWatch;
+  const mobileShare = isMobile && inCall && (session.isSharing || canWatch);
+  const showStream =
+    (!isMobile && (session.isSharing || canWatch)) || (isMobile && streamFocus && (session.isSharing || isWatching));
   const showPip =
     isMobile && inCall && !isFullscreen && isWatching && Boolean(session.remoteStream);
   const sharerName =
     people.find((person) => person.isSharing && person.userId !== access.userId)?.userName ||
+    userName ||
     "teste";
   const stageRef = useRef<HTMLDivElement>(null);
   const [cardSize, setCardSize] = useState<{ width: number; height: number } | null>(
@@ -892,8 +997,15 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   );
 
   useEffect(() => {
-    if (!session.hasRemoteStream) setIsWatching(false);
+    if (!session.hasRemoteStream) {
+      setIsWatching(false);
+      setStreamFocus(false);
+    }
   }, [session.hasRemoteStream]);
+
+  useEffect(() => {
+    if (!session.isSharing) setStreamFocus(false);
+  }, [session.isSharing]);
 
   useEffect(() => {
     const el = pipVideoRef.current;
@@ -940,19 +1052,24 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     }
   };
 
-  const startWatching = () => {
+  const startWatching = (focus = false) => {
     setIsWatching(true);
-    if (!isMobile) {
+    if (isMobile) {
+      if (focus) setStreamFocus(true);
       setIsFullscreen(true);
-      showChrome(2_000);
-      if (shellRef.current) {
-        void enterNativeFullscreen(shellRef.current).catch(() => undefined);
-      }
+      showChrome(30_000);
       return;
     }
     setIsFullscreen(true);
-    showChrome(30_000);
+    showChrome(2_000);
+    if (shellRef.current) {
+      void enterNativeFullscreen(shellRef.current).catch(() => undefined);
+    }
   };
+
+  useEffect(() => {
+    session.attachMediaToVideos();
+  }, [session.attachMediaToVideos, streamFocus, mobileShare, showStream, isWatching]);
 
   useEffect(() => {
     if (!showStream) {
@@ -1210,6 +1327,8 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                 : undefined
             }
           >
+            {showStream && (
+            <>
             <video
               ref={session.localVideoRef}
               autoPlay
@@ -1257,8 +1376,23 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                 </span>
               </>
             )}
+            {isMobile && streamFocus && (
+              <button
+                type="button"
+                className="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-md bg-black/55 text-white"
+                aria-label="Sair da tela cheia"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setStreamFocus(false);
+                }}
+              >
+                <Minimize2 className="h-4 w-4" />
+              </button>
+            )}
+            </>
+            )}
 
-            {!inCall && !showStream ? (
+            {!inCall && !showStream && !mobileShare ? (
               <div className="flex h-full w-full flex-col items-center justify-center px-4 text-center sm:px-6">
                 <p className="text-base font-medium text-zinc-200 sm:text-lg">
                   Você não está em nenhuma call
@@ -1269,7 +1403,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               </div>
             ) : (
               !showStream &&
-              (people.length <= 1 ? (
+              (people.length <= 1 && !mobileShare ? (
                 <ParticipantTile
                   name={people[0]?.userName || userName}
                   muted={!people[0] || !people[0].micEnabled}
@@ -1288,9 +1422,32 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                   className={cn(
                     "grid min-h-0 w-full gap-2 sm:gap-3",
                     isMobile ? "h-full auto-rows-fr" : "h-full",
-                    participantGridClass(people.length, isMobile),
+                    participantGridClass(
+                      people.length + (mobileShare ? 1 : 0),
+                      isMobile,
+                      mobileShare,
+                    ),
                   )}
                 >
+                  {mobileShare && (
+                    <ScreenShareTile
+                      self={session.isSharing}
+                      watching={isWatching}
+                      name={session.isSharing ? userName : sharerName}
+                      localVideoRef={session.localVideoRef}
+                      remoteVideoRef={session.remoteVideoRef}
+                      onWatch={() => startWatching()}
+                      onStop={
+                        session.isSharing
+                          ? () => void session.stopScreenShare()
+                          : undefined
+                      }
+                      onExpand={() => {
+                        if (session.isSharing || isWatching) setStreamFocus(true);
+                        else startWatching(true);
+                      }}
+                    />
+                  )}
                   {people.map((participant, index) => (
                     <ParticipantTile
                       key={participant.userId}
@@ -1299,7 +1456,13 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                       deafened={Boolean(participant.deafened)}
                       speaking={Boolean(participant.speaking)}
                       color={TILE_COLORS[index % TILE_COLORS.length]}
-                      className="h-full min-h-0"
+                      className={cn(
+                        "h-full min-h-0",
+                        isMobile &&
+                          (people.length + (mobileShare ? 1 : 0)) % 2 === 1 &&
+                          index === people.length - 1 &&
+                          "col-span-2 mx-auto w-[calc(50%-0.25rem)]",
+                      )}
                     />
                   ))}
                 </div>
