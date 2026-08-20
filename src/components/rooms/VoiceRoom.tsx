@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
+  ChevronDown,
   Headphones,
   HeadphoneOff,
   Maximize2,
@@ -63,7 +64,11 @@ function memberId(person: { id?: string; userId?: string }) {
   return person.userId || person.id || "";
 }
 
-function participantGridClass(count: number) {
+function participantGridClass(count: number, mobile = false) {
+  if (mobile) {
+    if (count <= 2) return "grid-cols-1";
+    return "grid-cols-2";
+  }
   if (count <= 1) return "grid-cols-1";
   if (count <= 2) return "grid-cols-1 min-[480px]:grid-cols-2";
   if (count <= 4) return "grid-cols-2";
@@ -72,12 +77,14 @@ function participantGridClass(count: number) {
 }
 
 function ParticipantTile({
+  name,
   muted,
   deafened,
   speaking,
   color,
   className,
 }: {
+  name?: string;
   muted: boolean;
   deafened?: boolean;
   speaking?: boolean;
@@ -93,15 +100,56 @@ function ParticipantTile({
       )}
       style={{ backgroundColor: color }}
     >
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/25 sm:h-16 sm:w-16">
-        <User className="h-6 w-6 text-white/90 sm:h-7 sm:w-7" />
+      <span className="flex h-[4.75rem] w-[4.75rem] items-center justify-center overflow-hidden rounded-full bg-black/25 sm:h-24 sm:w-24">
+        <User className="h-9 w-9 text-white/90 sm:h-11 sm:w-11" />
       </span>
-      {(deafened || muted) && (
-        <span className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded-lg bg-black/70 text-white sm:bottom-3 sm:left-3 sm:h-8 sm:w-8">
-          {deafened ? <HeadphoneOff className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+      {name ? (
+        <span className="absolute bottom-3 left-1/2 flex max-w-[88%] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/75 px-2.5 py-1 text-[11px] font-medium text-white">
+          {deafened ? (
+            <HeadphoneOff className="h-3.5 w-3.5 shrink-0" />
+          ) : muted ? (
+            <MicOff className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <Mic className="h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="truncate">{name}</span>
         </span>
+      ) : (
+        (deafened || muted) && (
+          <span className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded-lg bg-black/70 text-white sm:bottom-3 sm:left-3 sm:h-8 sm:w-8">
+            {deafened ? <HeadphoneOff className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+          </span>
+        )
       )}
     </div>
+  );
+}
+
+function MobileCallButton({
+  danger,
+  active,
+  label,
+  onClick,
+  children,
+}: {
+  danger?: boolean;
+  active?: boolean;
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className={cn(
+        "flex h-12 w-12 items-center justify-center rounded-full text-white transition",
+        danger ? "bg-[#e53935]" : active ? "bg-white/20" : "bg-[#3a3a3c]",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1078,14 +1126,47 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
         )}
 
         {isFullscreen && inCall && title && (
-          <h1
+          <header
             className={cn(
-              "pointer-events-none absolute left-[max(1rem,env(safe-area-inset-left))] top-[max(1rem,env(safe-area-inset-top))] z-30 text-xl font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.65)] transition-opacity duration-200 sm:left-6 sm:top-5 sm:text-2xl",
-              chromeVisible ? "opacity-100" : "opacity-0",
+              "z-30 flex shrink-0 items-center justify-between gap-3 px-4",
+              isMobile
+                ? "pt-[max(0.75rem,env(safe-area-inset-top))] pb-2"
+                : cn(
+                    "pointer-events-none absolute inset-x-0 top-0 sm:px-6",
+                    chromeVisible ? "opacity-100" : "opacity-0",
+                  ),
             )}
           >
-            {title}
-          </h1>
+            <button
+              type="button"
+              className="flex min-w-0 items-center gap-1 text-left"
+              onClick={() => {
+                if (isMobile) setIsFullscreen(false);
+              }}
+            >
+              <h1 className="truncate text-lg font-semibold drop-shadow-[0_2px_8px_rgba(0,0,0,0.65)] sm:text-2xl">
+                {title}
+              </h1>
+              {isMobile && <ChevronDown className="h-5 w-5 shrink-0 text-white/80" />}
+            </button>
+            {isMobile && (
+              <button
+                type="button"
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg",
+                  session.isDeafened ? "bg-white text-black" : "bg-white/10 text-white",
+                )}
+                title="Fone"
+                onClick={session.toggleDeafen}
+              >
+                {session.isDeafened ? (
+                  <HeadphoneOff className="h-5 w-5" />
+                ) : (
+                  <Headphones className="h-5 w-5" />
+                )}
+              </button>
+            )}
+          </header>
         )}
 
         <div
@@ -1095,8 +1176,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
             isFullscreen
               ? cn(
                   "overflow-hidden",
-                  isMobile &&
-                    "px-5 pt-[max(4.75rem,calc(env(safe-area-inset-top)+3.25rem))] pb-[max(8.25rem,calc(env(safe-area-inset-bottom)+6.5rem))]",
+                  isMobile && "px-3 pb-2 pt-1",
                 )
               : showStream
                 ? "overflow-hidden px-3 pb-2 sm:px-6"
@@ -1108,7 +1188,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               "relative",
               showStream
                 ? "overflow-hidden rounded-2xl bg-black"
-                : "flex h-full w-full items-center justify-center",
+                : "flex h-full min-h-0 w-full items-stretch justify-center",
               isFullscreen && showStream && "rounded-none",
             )}
             style={
@@ -1156,28 +1236,30 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               !showStream &&
               (people.length <= 1 ? (
                 <ParticipantTile
+                  name={people[0]?.userName || userName}
                   muted={!people[0] || !people[0].micEnabled}
                   deafened={Boolean(people[0]?.deafened)}
                   speaking={Boolean(people[0]?.speaking)}
                   color={TILE_COLORS[0]}
                   className={cn(
-                    "aspect-video rounded-xl sm:rounded-2xl",
+                    "rounded-xl sm:rounded-2xl",
                     isMobile
-                      ? "h-auto w-[min(100%,17.5rem)] max-h-[28dvh]"
-                      : "h-auto w-full max-h-full max-w-5xl",
+                      ? "h-full w-full"
+                      : "aspect-video h-auto w-full max-h-full max-w-5xl",
                   )}
                 />
               ) : (
                 <div
                   className={cn(
                     "grid min-h-0 w-full gap-2 sm:gap-3",
-                    isMobile ? "max-h-[52dvh] max-w-[20rem]" : "h-full",
-                    participantGridClass(people.length),
+                    isMobile ? "h-full auto-rows-fr" : "h-full",
+                    participantGridClass(people.length, isMobile),
                   )}
                 >
                   {people.map((participant, index) => (
                     <ParticipantTile
                       key={participant.userId}
+                      name={participant.userName}
                       muted={!participant.micEnabled}
                       deafened={Boolean(participant.deafened)}
                       speaking={Boolean(participant.speaking)}
@@ -1196,6 +1278,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
             {people.map((participant, index) => (
               <ParticipantTile
                 key={participant.userId}
+                name={participant.userName}
                 muted={!participant.micEnabled}
                 deafened={Boolean(participant.deafened)}
                 speaking={Boolean(participant.speaking)}
@@ -1209,15 +1292,66 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
         {inCall && (
         <div
           className={cn(
-            "flex max-w-full flex-wrap items-end justify-center pt-1 transition-opacity duration-200",
+            "z-30 flex max-w-full items-end justify-center transition-opacity duration-200",
             isFullscreen
-              ? cn(
-                  "absolute inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 gap-2 px-2 sm:gap-8 sm:px-4",
-                  chromeVisible ? "opacity-100" : "pointer-events-none opacity-0",
-                )
-              : "relative gap-3 px-2 pb-[max(1rem,env(safe-area-inset-bottom))] sm:gap-8 sm:px-4 sm:pb-6",
+              ? isMobile
+                ? "relative px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1"
+                : cn(
+                    "absolute inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] gap-2 px-2 sm:gap-8 sm:px-4",
+                    chromeVisible ? "opacity-100" : "pointer-events-none opacity-0",
+                  )
+              : "relative flex-wrap gap-3 px-2 pb-[max(1rem,env(safe-area-inset-bottom))] sm:gap-8 sm:px-4 sm:pb-6",
           )}
         >
+          {isMobile && isFullscreen ? (
+            <div className="flex items-center justify-center gap-3 rounded-full bg-[#2c2c2e] px-3 py-2">
+              <MobileCallButton
+                label="Microfone"
+                danger={!session.isMicOn}
+                onClick={() => {
+                  session.unlockAudio();
+                  void session.toggleMic();
+                }}
+              >
+                {session.isMicOn ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+              </MobileCallButton>
+              <MobileCallButton
+                label={session.isSharing ? "Parar de transmitir tela" : "Transmitir tela"}
+                active={session.isSharing}
+                onClick={
+                  session.isSharing
+                    ? () => void session.stopScreenShare()
+                    : () => void shareScreen()
+                }
+              >
+                {session.isSharing ? (
+                  <MonitorOff className="h-5 w-5" />
+                ) : (
+                  <Monitor className="h-5 w-5" />
+                )}
+              </MobileCallButton>
+              {canWatch && (
+                <MobileCallButton
+                  label={isWatching ? "Parar de assistir" : "Assistir transmissão"}
+                  active={isWatching}
+                  onClick={() => {
+                    if (isWatching) setIsWatching(false);
+                    else startWatching();
+                  }}
+                >
+                  {isWatching ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </MobileCallButton>
+              )}
+              <MobileCallButton
+                label="Desligar"
+                danger
+                onClick={() => void leaveAndGo()}
+              >
+                <PhoneOff className="h-5 w-5" />
+              </MobileCallButton>
+            </div>
+          ) : (
+            <>
           <ControlButton
             label="Microfone"
             danger={!session.isMicOn}
@@ -1270,6 +1404,8 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
           <ControlButton label="Desligar" danger onClick={() => void leaveAndGo()}>
             <PhoneOff className="h-6 w-6" />
           </ControlButton>
+            </>
+          )}
         </div>
         )}
       </div>
