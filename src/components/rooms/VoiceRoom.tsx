@@ -23,6 +23,7 @@ import { AudioSettingsPanel, ControlButton } from "@/components/rooms/AudioSetti
 import { useAnalysisRoom } from "@/hooks/useAnalysisRoom";
 import { useSocket } from "@/hooks/useSocket";
 import { formatOccupancy } from "@/lib/format";
+import { getMediaGranted, rememberMediaGranted, syncBrowserMediaGrants } from "@/lib/device";
 import { isEmuRoom, isMobRoom, isSupRoom, roomTitle } from "@/lib/room-names";
 import { cn } from "@/lib/utils";
 
@@ -129,7 +130,7 @@ interface SidebarRoom {
   maxParticipants: number;
   occupiedAt: string | null;
   organizationId?: string;
-  participants?: Array<{ id?: string; userId: string; screenSharing?: boolean }>;
+  participants?: Array<{ id?: string; userId: string; userName?: string; screenSharing?: boolean }>;
 }
 
 function useNow(active: boolean) {
@@ -287,7 +288,7 @@ function RoomSidebar({
   initialRooms,
 }: {
   currentId: string;
-  livePeople: Array<{ userId: string; isSharing?: boolean }>;
+  livePeople: Array<{ userId: string; userName?: string; isSharing?: boolean }>;
   selfId?: string;
   userName?: string;
   callStartedAt?: number | null;
@@ -347,6 +348,7 @@ function RoomSidebar({
     const fromApi = (item.participants ?? [])
       .map((person) => ({
         userId: memberId(person),
+        userName: person.userName || "teste",
         screenSharing: Boolean(person.screenSharing),
       }))
       .filter((person) => person.userId);
@@ -354,6 +356,7 @@ function RoomSidebar({
       .filter((person) => person.userId)
       .map((person) => ({
         userId: person.userId,
+        userName: person.userName || "teste",
         screenSharing: Boolean(person.isSharing),
       }));
     const inThisRoom = Boolean(currentId) && item.id === currentId;
@@ -364,6 +367,7 @@ function RoomSidebar({
           ? [
               {
                 userId: selfId,
+                userName: userName || "teste",
                 screenSharing: fromApi.find((person) => person.userId === selfId)?.screenSharing,
               },
               ...fromApi.filter((person) => person.userId !== selfId),
@@ -417,7 +421,7 @@ function RoomSidebar({
                 >
                   <User className="h-4 w-4 text-white" />
                 </span>
-                <span className="min-w-0 truncate">teste</span>
+                <span className="min-w-0 truncate">{person.userName || "teste"}</span>
                 {person.screenSharing && (
                   <span className="shrink-0 rounded bg-[#ed4245] px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white">
                     AO VIVO
@@ -577,6 +581,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   const autoFullscreenRef = useRef(false);
   const [wantMic, setWantMic] = useState(false);
   const [wantShare, setWantShare] = useState(false);
+  const [mediaGranted, setMediaGranted] = useState(getMediaGranted);
   const [audio, setAudio] = useState({
     inputDeviceId: "",
     outputDeviceId: "",
@@ -603,10 +608,26 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   }, [room.id]);
 
   useEffect(() => {
+    void syncBrowserMediaGrants().then(() => setMediaGranted(getMediaGranted()));
     const query = new URLSearchParams(window.location.search);
-    if (query.get("mic") === "1") setWantMic(true);
-    if (query.get("share") === "1") setWantShare(true);
+    const granted = getMediaGranted();
+    if (query.get("mic") === "1" && !granted.mic) setWantMic(true);
+    if (query.get("share") === "1" && !granted.share) setWantShare(true);
   }, []);
+
+  useEffect(() => {
+    if (!session.isMicOn) return;
+    rememberMediaGranted({ mic: true });
+    setMediaGranted(getMediaGranted());
+    setWantMic(false);
+  }, [session.isMicOn]);
+
+  useEffect(() => {
+    if (!session.isSharing) return;
+    rememberMediaGranted({ share: true });
+    setMediaGranted(getMediaGranted());
+    setWantShare(false);
+  }, [session.isSharing]);
 
   useEffect(() => {
     if (!room.id || room.number > 0) return;
@@ -918,6 +939,10 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     };
   }, [session.hasRemoteStream, session.isSharing, showStream]);
 
+  const askMic = Boolean(session.micHint) || (wantMic && !session.isMicOn && !mediaGranted.mic);
+  const askShare =
+    Boolean(session.shareHint) || (wantShare && !session.isSharing && !mediaGranted.share);
+
   const onSurfaceClick = (event: React.MouseEvent) => {
     if (!isFullscreen) return;
     if ((event.target as HTMLElement).closest("button")) {
@@ -942,7 +967,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
       )}
       onClick={onSurfaceClick}
     >
-      {(session.micHint || session.shareHint || session.error || (wantMic && !session.isMicOn) || (wantShare && !session.isSharing)) && (
+      {(session.error || askMic || askShare) && (
         <div className="absolute inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex flex-col items-center gap-2">
           {session.error && (
             <div className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-red-200 ring-1 ring-red-500/30">
@@ -956,7 +981,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               </button>
             </div>
           )}
-          {(session.micHint || (wantMic && !session.isMicOn)) && (
+          {askMic && (
             <div
               className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
               onClick={(event) => event.stopPropagation()}
@@ -975,7 +1000,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               </button>
             </div>
           )}
-          {(session.shareHint || (wantShare && !session.isSharing)) && (
+          {askShare && (
             <div
               className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
               onClick={(event) => event.stopPropagation()}
@@ -1006,6 +1031,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
           inCall
             ? people.map((person) => ({
                 userId: person.userId,
+                userName: person.userName,
                 isSharing: person.isSharing,
               }))
             : []

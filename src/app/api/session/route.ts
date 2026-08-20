@@ -2,15 +2,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { hydrateBetaSession, type BetaSession } from "@/lib/session";
+import { hydrateBetaSession, sessionCookieOptions, type BetaSession } from "@/lib/session";
 
 function withSessionCookie(response: NextResponse, session: BetaSession) {
-  response.cookies.set(SESSION_COOKIE, JSON.stringify(session), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24,
-  });
+  response.cookies.set(SESSION_COOKIE, JSON.stringify(session), sessionCookieOptions());
   return response;
 }
 

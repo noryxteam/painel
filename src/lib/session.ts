@@ -89,6 +89,17 @@ export async function getAnalysisAccess(
   }
 }
 
+export const SESSION_MAX_AGE = 60 * 60 * 24 * 365;
+
+export function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: SESSION_MAX_AGE,
+  };
+}
+
 export function createAccessToken(): string {
   return crypto.randomUUID();
 }

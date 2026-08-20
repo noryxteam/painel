@@ -45,7 +45,12 @@ export type SidebarRoom = {
   maxParticipants: number;
   occupiedAt: string | null;
   organizationId: string;
-  participants: Array<{ id: string; userId: string; screenSharing: boolean }>;
+  participants: Array<{
+    id: string;
+    userId: string;
+    userName?: string;
+    screenSharing: boolean;
+  }>;
 };
 
 export async function ensurePermanentRooms(organizationId: string) {
@@ -103,7 +108,12 @@ export async function listSidebarRooms(): Promise<SidebarRoom[]> {
         maxParticipants: number;
         occupiedAt: Date | null;
         organizationId: string;
-        participants: Array<{ id: string; userId: string; screenSharing: boolean }>;
+        participants: Array<{
+          id: string;
+          userId: string;
+          screenSharing: boolean;
+          user?: { name: string } | null;
+        }>;
       }>,
     ): SidebarRoom[] =>
       rooms.map((room) => ({
@@ -113,7 +123,12 @@ export async function listSidebarRooms(): Promise<SidebarRoom[]> {
         maxParticipants: room.maxParticipants,
         occupiedAt: room.occupiedAt?.toISOString() ?? null,
         organizationId: room.organizationId,
-        participants: room.participants,
+        participants: room.participants.map((person) => ({
+          id: person.id,
+          userId: person.userId,
+          userName: person.user?.name ?? "teste",
+          screenSharing: person.screenSharing,
+        })),
       }));
 
     const select = {
@@ -125,7 +140,12 @@ export async function listSidebarRooms(): Promise<SidebarRoom[]> {
       organizationId: true,
       participants: {
         where: { leftAt: null },
-        select: { id: true, userId: true, screenSharing: true },
+        select: {
+          id: true,
+          userId: true,
+          screenSharing: true,
+          user: { select: { name: true } },
+        },
         orderBy: { joinedAt: "asc" as const },
       },
     } as const;

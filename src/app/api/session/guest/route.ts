@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
-import { prisma } from "@/lib/prisma";
-import type { BetaSession } from "@/lib/session";
+import { ensureGuestUser } from "@/lib/guest-user";
+import { sessionCookieOptions, type BetaSession } from "@/lib/session";
 
 function publicOrigin(request: Request) {
   const host =
@@ -18,37 +18,23 @@ export async function GET(request: Request) {
   const destination = new URL("/salas", `${publicOrigin(request)}/`);
   const response = NextResponse.redirect(destination);
 
-  let payload: BetaSession = {
-    userId: "guest-local",
-    userName: "teste",
-    role: "PLAYER",
-  };
-
   try {
-    const user =
-      (await prisma.user.findFirst({
-        where: { name: "Pedro" },
-        select: { id: true, name: true, role: true },
-      })) ??
-      (await prisma.user.findFirst({
-        select: { id: true, name: true, role: true },
-      }));
-    if (user) {
-      payload = {
-        userId: user.id,
-        userName: user.name,
-        role: user.role,
-      };
-    }
+    const user = await ensureGuestUser(crypto.randomUUID());
+    const payload: BetaSession = {
+      userId: user.id,
+      userName: user.name,
+      role: user.role,
+    };
+    response.cookies.set(SESSION_COOKIE, JSON.stringify(payload), sessionCookieOptions());
   } catch (error) {
     console.error("guest session", error);
+    const payload: BetaSession = {
+      userId: `guest-${crypto.randomUUID()}`,
+      userName: "teste",
+      role: "PLAYER",
+    };
+    response.cookies.set(SESSION_COOKIE, JSON.stringify(payload), sessionCookieOptions());
   }
 
-  response.cookies.set(SESSION_COOKIE, JSON.stringify(payload), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24,
-  });
   return response;
 }

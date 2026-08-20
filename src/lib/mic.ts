@@ -1,3 +1,5 @@
+import { rememberMediaGranted } from "@/lib/device";
+
 export function shouldUpgradeToHttps() {
   if (typeof window === "undefined") return false;
   const host = window.location.hostname;
@@ -54,7 +56,9 @@ export async function captureMicrophone(inputDeviceId?: string) {
   let last: unknown;
   for (const constraints of attempts) {
     try {
-      return await media.getUserMedia(constraints);
+      const stream = await media.getUserMedia(constraints);
+      rememberMediaGranted({ mic: true });
+      return stream;
     } catch (error) {
       last = error;
     }
@@ -84,7 +88,9 @@ export async function captureDisplay() {
   let last: unknown;
   for (const constraints of attempts) {
     try {
-      return await media.getDisplayMedia(constraints);
+      const stream = await media.getDisplayMedia(constraints);
+      rememberMediaGranted({ share: true });
+      return stream;
     } catch (error) {
       if (error instanceof Error && error.name === "NotAllowedError") throw error;
       last = error;
