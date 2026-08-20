@@ -689,15 +689,9 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
 
   useEffect(() => {
     if (idle || !session.joined) return;
-    void navigator.permissions
-      ?.query({ name: "microphone" as PermissionName })
-      .then((status) => {
-        if (status.state === "granted" && !session.isMicOn) {
-          void session.enableMic();
-        }
-      })
-      .catch(() => undefined);
-  }, [idle, session.joined, session.enableMic, session.isMicOn]);
+    session.unlockAudio();
+    void session.enableMic();
+  }, [idle, session.joined, session.enableMic, session.unlockAudio]);
 
   const inCall = !idle && Boolean(room.id);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);

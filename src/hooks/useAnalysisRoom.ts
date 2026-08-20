@@ -76,8 +76,15 @@ export function useAnalysisRoom({
   const audioStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const speakingTimerRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const speakingSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const monitoredStreamRef = useRef<MediaStream | null>(null);
   const isDeafenedRef = useRef(false);
   const isMicOnRef = useRef(false);
+  const channelIdRef = useRef(channelId);
+  const socketRef = useRef(socket);
+  channelIdRef.current = channelId;
+  socketRef.current = socket;
   const audioConfigRef = useRef({
     inputDeviceId: "",
     outputDeviceId: "",
@@ -265,6 +272,13 @@ export function useAnalysisRoom({
             setParticipants(unique);
             syncPeers(unique);
           }
+        if (isMicOnRef.current) {
+          socket.emit("media-state", {
+            analysisId: channelId,
+            micEnabled: true,
+            speaking: false,
+          });
+        }
       } else setError(response?.error ?? "Falha ao entrar na sala");
     };
 
@@ -419,40 +433,101 @@ export function useAnalysisRoom({
     return () => window.clearTimeout(timer);
   }, [isSharing]);
 
+  const liveMicStream = useCallback(() => {
+    const stream = audioStreamRef.current;
+    if (!stream) return null;
+    const live = stream.getAudioTracks().some((track) => track.readyState === "live");
+    if (!live) {
+      stream.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+      return null;
+    }
+    return stream;
+  }, []);
+
+  const ensureAudioContext = useCallback(async () => {
+    const Ctor =
+      window.AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return null;
+    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+      audioContextRef.current = new Ctor();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume().catch(() => undefined);
+    }
+    return audioContextRef.current;
+  }, []);
+
   const startSpeakingMonitor = useCallback(
     (stream: MediaStream) => {
-      const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextCtor) return;
-      const context = new AudioContextCtor();
-      void context.resume();
-      const source = context.createMediaStreamSource(stream);
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const hangMs = 500;
-      let last = false;
-      let lastSpokeAt = 0;
+      if (monitoredStreamRef.current === stream && speakingTimerRef.current) {
+        void ensureAudioContext();
+        return;
+      }
+      if (speakingTimerRef.current) {
+        window.clearTimeout(speakingTimerRef.current);
+        speakingTimerRef.current = null;
+      }
+      speakingSourceRef.current?.disconnect();
+      speakingSourceRef.current = null;
+      monitoredStreamRef.current = stream;
 
-      const tick = () => {
-        analyser.getByteFrequencyData(data);
-        const avg = data.reduce((sum, value) => sum + value, 0) / data.length;
-        const now = performance.now();
-        const canSpeak = isMicOnRef.current && !isDeafenedRef.current;
-        if (canSpeak && avg > audioConfigRef.current.sensitivity) {
-          lastSpokeAt = now;
+      const run = async () => {
+        const context = await ensureAudioContext();
+        if (!context) return;
+        try {
+          const source = context.createMediaStreamSource(stream);
+          speakingSourceRef.current = source;
+          const analyser = context.createAnalyser();
+          analyser.fftSize = 1024;
+          analyser.smoothingTimeConstant = 0.3;
+          const silent = context.createGain();
+          silent.gain.value = 0;
+          source.connect(analyser);
+          analyser.connect(silent);
+          silent.connect(context.destination);
+          const data = new Uint8Array(analyser.fftSize);
+          const hangMs = 600;
+          let last = false;
+          let lastSpokeAt = 0;
+
+          const tick = () => {
+            if (context.state === "suspended") {
+              void context.resume().catch(() => undefined);
+            }
+            analyser.getByteTimeDomainData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) {
+              const sample = ((data[i] ?? 128) - 128) / 128;
+              sum += sample * sample;
+            }
+            const rms = Math.sqrt(sum / data.length);
+            const threshold = Math.max(0.018, audioConfigRef.current.sensitivity / 500);
+            const now = performance.now();
+            const canSpeak = isMicOnRef.current && !isDeafenedRef.current;
+            if (canSpeak && rms > threshold) {
+              lastSpokeAt = now;
+            }
+            const speaking = canSpeak && lastSpokeAt > 0 && now - lastSpokeAt < hangMs;
+            setIsSpeaking(speaking);
+            if (speaking !== last) {
+              last = speaking;
+              socketRef.current?.emit("media-state", {
+                analysisId: channelIdRef.current,
+                speaking,
+              });
+            }
+            speakingTimerRef.current = window.setTimeout(tick, 50);
+          };
+          tick();
+        } catch {
+          // Sem medidor o áudio da call continua.
         }
-        const speaking = canSpeak && lastSpokeAt > 0 && now - lastSpokeAt < hangMs;
-        setIsSpeaking(speaking);
-        if (speaking !== last) {
-          last = speaking;
-          socket?.emit("media-state", { analysisId: channelId, speaking });
-        }
-        speakingTimerRef.current = window.setTimeout(tick, 50);
       };
-      tick();
+      void run();
     },
-    [channelId, socket],
+    [ensureAudioContext],
   );
 
   const attachMicToPeers = useCallback(
@@ -471,14 +546,21 @@ export function useAnalysisRoom({
 
   const enableMic = useCallback(async () => {
     if (isDeafenedRef.current) return false;
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getAudioTracks().forEach((track) => {
+    await ensureAudioContext();
+    const existing = liveMicStream();
+    if (existing) {
+      existing.getAudioTracks().forEach((track) => {
         track.enabled = true;
       });
       isMicOnRef.current = true;
       setIsMicOn(true);
       setMicHint(null);
-      socket?.emit("media-state", { analysisId: channelId, micEnabled: true });
+      socketRef.current?.emit("media-state", {
+        analysisId: channelIdRef.current,
+        micEnabled: true,
+      });
+      startSpeakingMonitor(existing);
+      attachMicToPeers(existing);
       return true;
     }
 
@@ -488,20 +570,14 @@ export function useAnalysisRoom({
         return false;
       }
       const stream = await captureMicrophone(audioConfigRef.current.inputDeviceId);
-      try {
-        const Ctor =
-          window.AudioContext ||
-          (window as typeof window & { webkitAudioContext?: typeof AudioContext })
-            .webkitAudioContext;
-        if (Ctor) void new Ctor().resume();
-      } catch {
-        // Áudio da call segue mesmo se o medidor não iniciar.
-      }
       audioStreamRef.current = stream;
       isMicOnRef.current = true;
       setIsMicOn(true);
       setMicHint(null);
-      socket?.emit("media-state", { analysisId: channelId, micEnabled: true });
+      socketRef.current?.emit("media-state", {
+        analysisId: channelIdRef.current,
+        micEnabled: true,
+      });
       startSpeakingMonitor(stream);
       attachMicToPeers(stream);
       return true;
@@ -513,7 +589,7 @@ export function useAnalysisRoom({
       setMicHint(describeMicError(error));
       return false;
     }
-  }, [attachMicToPeers, channelId, socket, startSpeakingMonitor]);
+  }, [attachMicToPeers, ensureAudioContext, liveMicStream, startSpeakingMonitor]);
 
   const toggleMic = useCallback(async () => {
     if (isDeafenedRef.current) return;
@@ -535,10 +611,11 @@ export function useAnalysisRoom({
   }, [channelId, enableMic, socket]);
 
   const unlockAudio = useCallback(() => {
+    void ensureAudioContext();
     for (const slot of peersRef.current.values()) {
       void slot.audioEl.play().catch(() => undefined);
     }
-  }, []);
+  }, [ensureAudioContext]);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -692,12 +769,19 @@ export function useAnalysisRoom({
   useEffect(() => {
     return () => {
       socket?.emit("leave-room", { analysisId: channelId });
-      if (speakingTimerRef.current) window.clearTimeout(speakingTimerRef.current);
-      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
-      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       teardownAllPeers();
     };
   }, [channelId, socket, teardownAllPeers]);
+
+  useEffect(() => {
+    return () => {
+      if (speakingTimerRef.current) window.clearTimeout(speakingTimerRef.current);
+      speakingSourceRef.current?.disconnect();
+      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      void audioContextRef.current?.close();
+    };
+  }, []);
 
   return {
     localVideoRef,

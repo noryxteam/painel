@@ -72,7 +72,7 @@ svg {
 }
 
 .speaking-glow {
-  box-shadow: 0 0 0 3px #34d399;
+  box-shadow: 0 0 0 3px #23a55a, 0 0 18px rgba(35, 165, 90, 0.7);
 }
 
 .sidebar-scroll {
