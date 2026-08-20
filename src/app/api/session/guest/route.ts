@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { ensureGuestUser } from "@/lib/guest-user";
-import { sessionCookieOptions, type BetaSession } from "@/lib/session";
+import {
+  isSecureRequest,
+  sessionCookieOptions,
+  type BetaSession,
+} from "@/lib/session";
 
 function publicOrigin(request: Request) {
   const host =
@@ -17,6 +21,7 @@ function publicOrigin(request: Request) {
 export async function GET(request: Request) {
   const destination = new URL("/salas", `${publicOrigin(request)}/`);
   const response = NextResponse.redirect(destination);
+  const cookie = sessionCookieOptions(isSecureRequest(request));
 
   try {
     const user = await ensureGuestUser(crypto.randomUUID());
@@ -25,7 +30,7 @@ export async function GET(request: Request) {
       userName: user.name,
       role: user.role,
     };
-    response.cookies.set(SESSION_COOKIE, JSON.stringify(payload), sessionCookieOptions());
+    response.cookies.set(SESSION_COOKIE, JSON.stringify(payload), cookie);
   } catch (error) {
     console.error("guest session", error);
     const payload: BetaSession = {
@@ -33,7 +38,7 @@ export async function GET(request: Request) {
       userName: "teste",
       role: "PLAYER",
     };
-    response.cookies.set(SESSION_COOKIE, JSON.stringify(payload), sessionCookieOptions());
+    response.cookies.set(SESSION_COOKIE, JSON.stringify(payload), cookie);
   }
 
   return response;

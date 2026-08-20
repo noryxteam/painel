@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { ensureGuestUser, normalizeDeviceId } from "@/lib/guest-user";
-import { sessionCookieOptions, type BetaSession } from "@/lib/session";
+import {
+  isSecureRequest,
+  sessionCookieOptions,
+  type BetaSession,
+} from "@/lib/session";
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { deviceId?: string };
@@ -15,7 +19,11 @@ export async function POST(request: Request) {
       role: user.role,
     };
     const response = NextResponse.json({ session, ...session });
-    response.cookies.set(SESSION_COOKIE, JSON.stringify(session), sessionCookieOptions());
+    response.cookies.set(
+      SESSION_COOKIE,
+      JSON.stringify(session),
+      sessionCookieOptions(isSecureRequest(request)),
+    );
     return response;
   } catch (error) {
     return NextResponse.json(

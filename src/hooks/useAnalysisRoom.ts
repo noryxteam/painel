@@ -46,7 +46,76 @@ interface PeerSlot {
   videoSender: RTCRtpSender | null;
 }
 
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+function iceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
+  ];
+  const turnUrls = process.env.NEXT_PUBLIC_TURN_URLS?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const username = process.env.NEXT_PUBLIC_TURN_USERNAME;
+  const credential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
+  if (turnUrls?.length && username && credential) {
+    servers.push({ urls: turnUrls, username, credential });
+    return servers;
+  }
+  servers.push(
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:80?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turns:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+  );
+  return servers;
+}
+
+function createRemoteAudioElement() {
+  const el = document.createElement("audio");
+  el.autoplay = true;
+  el.playsInline = true;
+  el.setAttribute("playsinline", "true");
+  el.setAttribute("webkit-playsinline", "true");
+  el.preload = "auto";
+  el.controls = false;
+  el.volume = 1;
+  el.style.cssText =
+    "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1";
+  document.body.appendChild(el);
+  return el;
+}
+
+async function playRemoteAudio(el: HTMLAudioElement, muted: boolean) {
+  el.autoplay = true;
+  el.playsInline = true;
+  el.muted = muted;
+  try {
+    await el.play();
+  } catch {
+    const retry = () => {
+      el.muted = muted;
+      void el.play().catch(() => undefined);
+    };
+    document.addEventListener("touchend", retry, { once: true, passive: true });
+    document.addEventListener("click", retry, { once: true });
+  }
+}
 
 function preferH264(transceiver: RTCRtpTransceiver) {
   const caps = RTCRtpSender.getCapabilities?.("video");
@@ -143,6 +212,7 @@ export function useAnalysisRoom({
     slot.pc.close();
     slot.audioEl.pause();
     slot.audioEl.srcObject = null;
+    slot.audioEl.remove();
     peersRef.current.delete(remoteId);
   }, []);
 
@@ -202,9 +272,12 @@ export function useAnalysisRoom({
       if (existing) return existing;
       if (!socket) return null;
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      const audioEl = new Audio();
-      audioEl.autoplay = true;
+      const pc = new RTCPeerConnection({
+        iceServers: iceServers(),
+        iceCandidatePoolSize: 8,
+        bundlePolicy: "max-bundle",
+      });
+      const audioEl = createRemoteAudioElement();
       audioEl.volume = audioConfigRef.current.outputVolume;
       audioEl.muted = isDeafenedRef.current;
       if (audioConfigRef.current.outputDeviceId && "setSinkId" in audioEl) {
@@ -269,8 +342,27 @@ export function useAnalysisRoom({
           }
           return;
         }
-        slot.audioEl.srcObject = stream;
-        void slot.audioEl.play().catch(() => undefined);
+        event.track.enabled = true;
+        const audioOnly = new MediaStream([event.track]);
+        slot.audioEl.srcObject = audioOnly;
+        void playRemoteAudio(slot.audioEl, isDeafenedRef.current);
+        event.track.addEventListener("unmute", () => {
+          void playRemoteAudio(slot.audioEl, isDeafenedRef.current);
+        });
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "connected") {
+          void playRemoteAudio(slot.audioEl, isDeafenedRef.current);
+        }
+      };
+      pc.oniceconnectionstatechange = () => {
+        if (
+          pc.iceConnectionState === "connected" ||
+          pc.iceConnectionState === "completed"
+        ) {
+          void playRemoteAudio(slot.audioEl, isDeafenedRef.current);
+        }
       };
 
       pc.onnegotiationneeded = () => {
@@ -586,11 +678,7 @@ export function useAnalysisRoom({
           const analyser = context.createAnalyser();
           analyser.fftSize = 1024;
           analyser.smoothingTimeConstant = 0.3;
-          const silent = context.createGain();
-          silent.gain.value = 0;
           source.connect(analyser);
-          analyser.connect(silent);
-          silent.connect(context.destination);
           const data = new Uint8Array(analyser.fftSize);
           const hangMs = 600;
           let last = false;
@@ -690,6 +778,9 @@ export function useAnalysisRoom({
       });
       startSpeakingMonitor(existing);
       attachMicToPeers(existing);
+      for (const slot of peersRef.current.values()) {
+        void playRemoteAudio(slot.audioEl, isDeafenedRef.current);
+      }
       return true;
     }
 
@@ -709,6 +800,9 @@ export function useAnalysisRoom({
       });
       startSpeakingMonitor(stream);
       attachMicToPeers(stream);
+      for (const slot of peersRef.current.values()) {
+        void playRemoteAudio(slot.audioEl, isDeafenedRef.current);
+      }
       return true;
     } catch (error) {
       if (shouldUpgradeToHttps()) {
@@ -738,7 +832,7 @@ export function useAnalysisRoom({
   const unlockAudio = useCallback(() => {
     void ensureAudioContext();
     for (const slot of peersRef.current.values()) {
-      void slot.audioEl.play().catch(() => undefined);
+      void playRemoteAudio(slot.audioEl, isDeafenedRef.current);
     }
   }, [ensureAudioContext]);
 

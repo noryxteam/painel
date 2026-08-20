@@ -15,9 +15,9 @@ export function useSocket() {
       socket = io({
         path: "/api/socket",
         autoConnect: true,
-        transports: ["websocket", "polling"],
-        rememberUpgrade: true,
-        timeout: 8000,
+        transports: ["polling", "websocket"],
+        rememberUpgrade: false,
+        timeout: 20000,
       });
     }
     setInstance(socket);

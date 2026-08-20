@@ -22,13 +22,9 @@ export function VoiceRoomMount({
   role: "PLAYER" | "ADMIN";
 }) {
   const [identity, setIdentity] = useState({ userName, userId, role });
-  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (role === "ADMIN") {
-      setReady(true);
-      return;
-    }
+    if (role === "ADMIN") return;
     const deviceId = getOrCreateDeviceId();
     void fetch("/api/session/device", {
       method: "POST",
@@ -45,11 +41,10 @@ export function VoiceRoomMount({
           });
         }
       })
-      .catch(() => undefined)
-      .finally(() => setReady(true));
+      .catch(() => undefined);
   }, [role]);
 
-  if (!ready || !identity.userId) {
+  if (!identity.userId) {
     return <div className="h-dvh bg-[#111214]" />;
   }
 

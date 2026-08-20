@@ -91,10 +91,17 @@ export async function getAnalysisAccess(
 
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 365;
 
-export function sessionCookieOptions() {
+export function isSecureRequest(request: Request) {
+  const proto =
+    request.headers.get("x-forwarded-proto") ?? new URL(request.url).protocol;
+  return proto.includes("https");
+}
+
+export function sessionCookieOptions(secure = false) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
+    secure,
     path: "/",
     maxAge: SESSION_MAX_AGE,
   };
