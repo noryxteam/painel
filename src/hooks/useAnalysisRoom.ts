@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { captureDisplay, captureMicrophone, describeMicError, describeShareError } from "@/lib/mic";
+import { captureDisplay, captureMicrophone, describeMicError, describeShareError, shouldUpgradeToHttps, upgradeToHttps } from "@/lib/mic";
 
 export interface RoomParticipant {
   userId: string;
@@ -473,6 +473,10 @@ export function useAnalysisRoom({
     }
 
     try {
+      if (shouldUpgradeToHttps()) {
+        upgradeToHttps("mic");
+        return false;
+      }
       const stream = await captureMicrophone(audioConfigRef.current.inputDeviceId);
       try {
         const Ctor =
@@ -492,6 +496,10 @@ export function useAnalysisRoom({
       attachMicToPeers(stream);
       return true;
     } catch (error) {
+      if (shouldUpgradeToHttps()) {
+        upgradeToHttps("mic");
+        return false;
+      }
       setMicHint(describeMicError(error));
       return false;
     }
@@ -527,6 +535,10 @@ export function useAnalysisRoom({
   const startScreenShare = async () => {
     if (!canShareScreen) return;
     try {
+      if (shouldUpgradeToHttps()) {
+        upgradeToHttps("share");
+        return;
+      }
       const stream = await captureDisplay();
       screenStreamRef.current = stream;
       setIsSharing(true);
@@ -548,6 +560,10 @@ export function useAnalysisRoom({
         void stopScreenShare();
       });
     } catch (err) {
+      if (shouldUpgradeToHttps()) {
+        upgradeToHttps("share");
+        return;
+      }
       setShareHint(describeShareError(err));
     }
   };

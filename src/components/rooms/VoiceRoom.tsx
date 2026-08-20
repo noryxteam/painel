@@ -556,6 +556,8 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const autoFullscreenRef = useRef(false);
+  const [wantMic, setWantMic] = useState(false);
+  const [wantShare, setWantShare] = useState(false);
   const [audio, setAudio] = useState({
     inputDeviceId: "",
     outputDeviceId: "",
@@ -580,6 +582,12 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   useEffect(() => {
     setIdle(!room.id);
   }, [room.id]);
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("mic") === "1") setWantMic(true);
+    if (query.get("share") === "1") setWantShare(true);
+  }, []);
 
   useEffect(() => {
     if (!room.id || room.number > 0) return;
@@ -904,7 +912,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
       )}
       onClick={onSurfaceClick}
     >
-      {(session.micHint || session.shareHint || session.error) && (
+      {(session.micHint || session.shareHint || session.error || (wantMic && !session.isMicOn) || (wantShare && !session.isSharing)) && (
         <div className="absolute inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex flex-col items-center gap-2">
           {session.error && (
             <div className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-red-200 ring-1 ring-red-500/30">
@@ -918,12 +926,12 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               </button>
             </div>
           )}
-          {session.micHint && (
+          {(session.micHint || (wantMic && !session.isMicOn)) && (
             <div
               className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
               onClick={(event) => event.stopPropagation()}
             >
-              <p>{session.micHint}</p>
+              <p>{session.micHint ?? "Toque para o celular pedir o microfone."}</p>
               <button
                 type="button"
                 className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
@@ -937,12 +945,12 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               </button>
             </div>
           )}
-          {session.shareHint && (
+          {(session.shareHint || (wantShare && !session.isSharing)) && (
             <div
               className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
               onClick={(event) => event.stopPropagation()}
             >
-              <p>{session.shareHint}</p>
+              <p>{session.shareHint ?? "Toque para o celular pedir a transmissão de tela."}</p>
               <button
                 type="button"
                 className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"

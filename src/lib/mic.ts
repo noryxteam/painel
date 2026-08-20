@@ -1,6 +1,31 @@
+export function shouldUpgradeToHttps() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return false;
+  return window.location.protocol === "http:";
+}
+
+export function canUseLiveMedia() {
+  return Boolean(
+    typeof navigator !== "undefined" &&
+      window.isSecureContext &&
+      navigator.mediaDevices?.getUserMedia,
+  );
+}
+
+export function upgradeToHttps(reason: "mic" | "share" = "mic") {
+  if (typeof window === "undefined") return false;
+  if (window.location.protocol === "https:") return false;
+  const url = new URL(window.location.href);
+  url.protocol = "https:";
+  url.searchParams.set(reason, "1");
+  window.location.replace(url.toString());
+  return true;
+}
+
 export async function captureMicrophone(inputDeviceId?: string) {
   const media = navigator.mediaDevices;
-  if (!media?.getUserMedia) {
+  if (!window.isSecureContext || !media?.getUserMedia) {
     throw new Error("INSECURE_CONTEXT");
   }
 
@@ -39,7 +64,7 @@ export async function captureMicrophone(inputDeviceId?: string) {
 
 export async function captureDisplay() {
   const media = navigator.mediaDevices;
-  if (!media?.getDisplayMedia) {
+  if (!window.isSecureContext || !media?.getDisplayMedia) {
     throw new Error("DISPLAY_UNSUPPORTED");
   }
   try {
@@ -63,7 +88,7 @@ export async function captureDisplay() {
 export function describeMicError(error: unknown) {
   const name = error instanceof Error ? error.name : "";
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-    return "Toque em Permitir quando o celular pedir o microfone.";
+    return "Toque em Permitir na janela do celular.";
   }
   if (name === "NotFoundError" || name === "DevicesNotFoundError") {
     return "Nenhum microfone encontrado neste aparelho.";
@@ -71,7 +96,7 @@ export function describeMicError(error: unknown) {
   if (name === "NotReadableError" || name === "TrackStartError") {
     return "O microfone está em uso por outro app. Feche o app e toque de novo.";
   }
-  return "Toque no microfone e permita o acesso para falar.";
+  return "Toque em Permitir microfone para o celular pedir o acesso.";
 }
 
 export function describeShareError(error: unknown) {
@@ -81,7 +106,7 @@ export function describeShareError(error: unknown) {
     return "Este celular não transmite tela. Transmita pelo computador.";
   }
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-    return "Toque em Permitir quando o celular pedir para transmitir a tela.";
+    return "Toque em Permitir na janela do celular.";
   }
-  return "Toque em transmitir tela e permita quando o celular perguntar.";
+  return "Toque em transmitir tela para o celular pedir o acesso.";
 }
