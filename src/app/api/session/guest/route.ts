@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import type { BetaSession } from "@/lib/session";
 
 export async function GET(request: Request) {
   const destination = new URL("/salas", request.url);
   const response = NextResponse.redirect(destination);
 
-  let payload = {
+  let payload: BetaSession = {
     userId: "guest-local",
     userName: "teste",
-    role: "PLAYER" as const,
+    role: "PLAYER",
   };
 
   try {
