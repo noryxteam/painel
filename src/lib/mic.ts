@@ -66,12 +66,27 @@ export async function captureMicrophone(inputDeviceId?: string) {
   throw last instanceof Error ? last : new Error("MIC_DENIED");
 }
 
-export async function captureDisplay() {
+function getDisplayCapture() {
   const media = navigator.mediaDevices;
+  if (!media) return null;
+  if (typeof media.getDisplayMedia === "function") {
+    return media.getDisplayMedia.bind(media);
+  }
+  const webkit = (
+    media as MediaDevices & {
+      webkitGetDisplayMedia?: MediaDevices["getDisplayMedia"];
+    }
+  ).webkitGetDisplayMedia;
+  if (typeof webkit === "function") return webkit.bind(media);
+  return null;
+}
+
+export async function captureDisplay() {
   if (!window.isSecureContext) {
     throw new Error("INSECURE_CONTEXT");
   }
-  if (!media?.getDisplayMedia) {
+  const getDisplay = getDisplayCapture();
+  if (!getDisplay) {
     throw new Error("DISPLAY_UNSUPPORTED");
   }
   const attempts: DisplayMediaStreamOptions[] = [
@@ -79,8 +94,8 @@ export async function captureDisplay() {
     {
       video: {
         frameRate: { ideal: 30, max: 60 },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
       },
       audio: false,
     },
@@ -88,7 +103,7 @@ export async function captureDisplay() {
   let last: unknown;
   for (const constraints of attempts) {
     try {
-      const stream = await media.getDisplayMedia(constraints);
+      const stream = await getDisplay(constraints);
       rememberMediaGranted({ share: true });
       return stream;
     } catch (error) {
@@ -120,7 +135,7 @@ export function describeShareError(error: unknown) {
     return "Toque em Permitir tela para o celular pedir o acesso.";
   }
   if (message === "DISPLAY_UNSUPPORTED") {
-    return "Este celular não transmite tela. Transmita pelo computador.";
+    return "O iPhone não pede transmissão de tela em site. Use um computador ou um Android.";
   }
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
     return "Toque em Permitir na janela do celular.";

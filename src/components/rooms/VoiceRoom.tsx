@@ -1006,20 +1006,22 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               onClick={(event) => event.stopPropagation()}
             >
               <p>{session.shareHint ?? "Toque para o celular pedir a transmissão de tela."}</p>
-              <button
-                type="button"
-                className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void session.startScreenShare().then((ok) => {
-                    if (!ok) return;
-                    setIsFullscreen(true);
-                    showChrome(isMobile ? 30_000 : 2_000);
-                  });
-                }}
-              >
-                Permitir tela
-              </button>
+              {!session.shareHint?.includes("não pede transmissão de tela") && (
+                <button
+                  type="button"
+                  className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void session.startScreenShare().then((ok) => {
+                      if (!ok) return;
+                      setIsFullscreen(true);
+                      showChrome(isMobile ? 30_000 : 2_000);
+                    });
+                  }}
+                >
+                  Permitir tela
+                </button>
+              )}
             </div>
           )}
         </div>
