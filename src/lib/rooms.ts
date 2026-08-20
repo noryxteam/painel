@@ -94,54 +94,59 @@ export async function listRooms(organizationId: string) {
 }
 
 export async function listSidebarRooms(): Promise<SidebarRoom[]> {
-  const mapRooms = (
-    rooms: Array<{
-      id: string;
-      name: string;
-      number: number;
-      maxParticipants: number;
-      occupiedAt: Date | null;
-      organizationId: string;
-      participants: Array<{ id: string; userId: string; screenSharing: boolean }>;
-    }>,
-  ): SidebarRoom[] =>
-    rooms.map((room) => ({
-      id: room.id,
-      name: room.name,
-      number: room.number,
-      maxParticipants: room.maxParticipants,
-      occupiedAt: room.occupiedAt?.toISOString() ?? null,
-      organizationId: room.organizationId,
-      participants: room.participants,
-    }));
+  try {
+    const mapRooms = (
+      rooms: Array<{
+        id: string;
+        name: string;
+        number: number;
+        maxParticipants: number;
+        occupiedAt: Date | null;
+        organizationId: string;
+        participants: Array<{ id: string; userId: string; screenSharing: boolean }>;
+      }>,
+    ): SidebarRoom[] =>
+      rooms.map((room) => ({
+        id: room.id,
+        name: room.name,
+        number: room.number,
+        maxParticipants: room.maxParticipants,
+        occupiedAt: room.occupiedAt?.toISOString() ?? null,
+        organizationId: room.organizationId,
+        participants: room.participants,
+      }));
 
-  const select = {
-    id: true,
-    name: true,
-    number: true,
-    maxParticipants: true,
-    occupiedAt: true,
-    organizationId: true,
-    participants: {
-      where: { leftAt: null },
-      select: { id: true, userId: true, screenSharing: true },
-      orderBy: { joinedAt: "asc" as const },
-    },
-  } as const;
+    const select = {
+      id: true,
+      name: true,
+      number: true,
+      maxParticipants: true,
+      occupiedAt: true,
+      organizationId: true,
+      participants: {
+        where: { leftAt: null },
+        select: { id: true, userId: true, screenSharing: true },
+        orderBy: { joinedAt: "asc" as const },
+      },
+    } as const;
 
-  const org =
-    (await prisma.analysisRoom.findFirst({ select: { organizationId: true } })) ??
-    (await prisma.organization.findFirst({ select: { id: true } }));
-  if (org) {
-    await ensurePermanentRooms("organizationId" in org ? org.organizationId : org.id);
+    const org =
+      (await prisma.analysisRoom.findFirst({ select: { organizationId: true } })) ??
+      (await prisma.organization.findFirst({ select: { id: true } }));
+    if (org) {
+      await ensurePermanentRooms("organizationId" in org ? org.organizationId : org.id);
+    }
+
+    const rooms = await prisma.analysisRoom.findMany({
+      select,
+      orderBy: { number: "asc" },
+    });
+
+    return mapRooms(rooms);
+  } catch (error) {
+    console.error("listSidebarRooms", error);
+    return [];
   }
-
-  const rooms = await prisma.analysisRoom.findMany({
-    select,
-    orderBy: { number: "asc" },
-  });
-
-  return mapRooms(rooms);
 }
 
 export async function getRoomMediaInfo(roomId: string) {

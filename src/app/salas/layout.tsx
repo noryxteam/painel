@@ -8,10 +8,21 @@ export default async function SalasLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [session, rooms] = await Promise.all([
-    getBetaSession(),
-    listSidebarRooms(),
-  ]);
+  let session = null;
+  let rooms: Awaited<ReturnType<typeof listSidebarRooms>> = [];
+
+  try {
+    session = await getBetaSession();
+  } catch (error) {
+    console.error("getBetaSession", error);
+  }
+
+  try {
+    rooms = await listSidebarRooms();
+  } catch (error) {
+    console.error("salas layout rooms", error);
+  }
+
   if (!session) redirect("/api/session/guest");
 
   return (
