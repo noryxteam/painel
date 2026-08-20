@@ -879,11 +879,13 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.removedReason]);
 
-  const showStream =
-    session.isSharing || (isWatching && session.hasRemoteStream && (isFullscreen || !isMobile));
+  const canWatch = session.hasRemoteStream && !session.isSharing;
+  const showStream = session.isSharing || canWatch;
   const showPip =
     isMobile && inCall && !isFullscreen && isWatching && Boolean(session.remoteStream);
-  const canWatch = session.hasRemoteStream && !session.isSharing;
+  const sharerName =
+    people.find((person) => person.isSharing && person.userId !== access.userId)?.userName ||
+    "teste";
   const stageRef = useRef<HTMLDivElement>(null);
   const [cardSize, setCardSize] = useState<{ width: number; height: number } | null>(
     null,
@@ -940,11 +942,16 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
 
   const startWatching = () => {
     setIsWatching(true);
-    setIsFullscreen(true);
-    showChrome(isMobile ? 30_000 : 2_000);
-    if (!isMobile && shellRef.current) {
-      void enterNativeFullscreen(shellRef.current).catch(() => undefined);
+    if (!isMobile) {
+      setIsFullscreen(true);
+      showChrome(2_000);
+      if (shellRef.current) {
+        void enterNativeFullscreen(shellRef.current).catch(() => undefined);
+      }
+      return;
     }
+    setIsFullscreen(true);
+    showChrome(30_000);
   };
 
   useEffect(() => {
@@ -1187,13 +1194,15 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
             className={cn(
               "relative",
               showStream
-                ? "overflow-hidden rounded-2xl bg-black"
+                ? cn(
+                    "overflow-hidden rounded-2xl bg-[#2b2d31]",
+                    isFullscreen && !isMobile && "rounded-none",
+                  )
                 : "flex h-full min-h-0 w-full items-stretch justify-center",
-              isFullscreen && showStream && "rounded-none",
             )}
             style={
               showStream
-                ? isFullscreen
+                ? isMobile || isFullscreen || !isWatching
                   ? { width: "100%", height: "100%" }
                   : cardSize
                     ? { width: cardSize.width, height: cardSize.height }
@@ -1216,12 +1225,38 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               ref={session.remoteVideoRef}
               autoPlay
               playsInline
+              muted={!isWatching}
               className={
-                !session.isSharing && isWatching && session.hasRemoteStream
-                  ? "h-full w-full object-contain"
+                canWatch
+                  ? cn(
+                      "h-full w-full",
+                      isWatching ? "bg-black object-contain" : "scale-105 object-cover",
+                    )
                   : "pointer-events-none absolute h-0 w-0 opacity-0"
               }
             />
+            {canWatch && (
+              <>
+                {!isWatching && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#1e1f22]/55 backdrop-blur-md">
+                    <button
+                      type="button"
+                      className="rounded-lg bg-[#3f4147] px-4 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-[#4a4d55]"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        startWatching();
+                      }}
+                    >
+                      Assista à transmissão
+                    </button>
+                  </div>
+                )}
+                <span className="absolute bottom-3 left-3 z-20 flex max-w-[70%] items-center gap-1.5 rounded-full bg-black/80 px-2.5 py-1 text-xs font-medium text-white">
+                  <Monitor className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{sharerName}</span>
+                </span>
+              </>
+            )}
 
             {!inCall && !showStream ? (
               <div className="flex h-full w-full flex-col items-center justify-center px-4 text-center sm:px-6">
@@ -1330,16 +1365,13 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                   <Monitor className="h-5 w-5" />
                 )}
               </MobileCallButton>
-              {canWatch && (
+              {canWatch && isWatching && (
                 <MobileCallButton
-                  label={isWatching ? "Parar de assistir" : "Assistir transmissão"}
-                  active={isWatching}
-                  onClick={() => {
-                    if (isWatching) setIsWatching(false);
-                    else startWatching();
-                  }}
+                  label="Parar de assistir"
+                  active
+                  onClick={() => setIsWatching(false)}
                 >
-                  {isWatching ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  <EyeOff className="h-5 w-5" />
                 </MobileCallButton>
               )}
               <MobileCallButton
