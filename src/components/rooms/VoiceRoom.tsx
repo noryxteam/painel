@@ -1093,7 +1093,11 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
           className={cn(
             "relative flex min-h-0 min-w-0 flex-1 items-center justify-center",
             isFullscreen
-              ? "overflow-hidden"
+              ? cn(
+                  "overflow-hidden",
+                  isMobile &&
+                    "px-5 pt-[max(4.75rem,calc(env(safe-area-inset-top)+3.25rem))] pb-[max(8.25rem,calc(env(safe-area-inset-bottom)+6.5rem))]",
+                )
               : showStream
                 ? "overflow-hidden px-3 pb-2 sm:px-6"
                 : "overflow-visible px-3 pb-2 sm:px-6",
@@ -1156,12 +1160,18 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                   deafened={Boolean(people[0]?.deafened)}
                   speaking={Boolean(people[0]?.speaking)}
                   color={TILE_COLORS[0]}
-                  className="aspect-video h-auto w-full max-h-full max-w-5xl rounded-xl sm:rounded-2xl"
+                  className={cn(
+                    "aspect-video rounded-xl sm:rounded-2xl",
+                    isMobile
+                      ? "h-auto w-[min(100%,17.5rem)] max-h-[28dvh]"
+                      : "h-auto w-full max-h-full max-w-5xl",
+                  )}
                 />
               ) : (
                 <div
                   className={cn(
-                    "grid h-full min-h-0 w-full gap-2 sm:gap-3",
+                    "grid min-h-0 w-full gap-2 sm:gap-3",
+                    isMobile ? "max-h-[52dvh] max-w-[20rem]" : "h-full",
                     participantGridClass(people.length),
                   )}
                 >
