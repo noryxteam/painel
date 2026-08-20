@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { captureDisplay, captureMicrophone, describeMicError, describeShareError, shouldUpgradeToHttps, upgradeToHttps } from "@/lib/mic";
+import {
+  captureDisplay,
+  captureMicrophone,
+  describeMicError,
+  describeShareError,
+  shouldUpgradeToHttps,
+  upgradeToHttps,
+  watchDisplayCaptureEnd,
+} from "@/lib/mic";
 
 export interface RoomParticipant {
   userId: string;
@@ -77,6 +85,9 @@ export function useAnalysisRoom({
   const peersRef = useRef<Map<string, PeerSlot>>(new Map());
   const audioStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const isSharingRef = useRef(false);
+  const unwatchDisplayRef = useRef<(() => void) | null>(null);
+  const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const speakingTimerRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const speakingSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -316,8 +327,13 @@ export function useAnalysisRoom({
     const onStatus = (payload: { status: string }) => setStatus(payload.status);
     const onEnded = () => {
       setStatus("FINALIZADA");
+      unwatchDisplayRef.current?.();
+      unwatchDisplayRef.current = null;
+      void wakeLockRef.current?.release().catch(() => undefined);
+      wakeLockRef.current = null;
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current = null;
+      isSharingRef.current = false;
       setIsSharing(false);
       setHasRemoteStream(false);
       setRemoteStream(null);
@@ -442,6 +458,45 @@ export function useAnalysisRoom({
     }, 50);
     return () => window.clearTimeout(timer);
   }, [isSharing]);
+
+  useEffect(() => {
+    const restore = () => {
+      const stream = screenStreamRef.current;
+      const track = stream?.getVideoTracks().find((item) => item.readyState === "live");
+      if (!stream || !track || !isSharingRef.current) return;
+      void playVideo(localVideoRef.current, stream);
+      for (const [remoteId, slot] of peersRef.current) {
+        if (slot.videoSender) void slot.videoSender.replaceTrack(track);
+        else {
+          slot.videoSender = slot.pc.addTrack(track, stream);
+          void offerTo(remoteId);
+        }
+      }
+      if (!wakeLockRef.current) {
+        void navigator.wakeLock
+          ?.request("screen")
+          .then((lock) => {
+            if (!isSharingRef.current) {
+              void lock.release().catch(() => undefined);
+              return;
+            }
+            wakeLockRef.current = lock;
+          })
+          .catch(() => undefined);
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") restore();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", restore);
+    window.addEventListener("focus", restore);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", restore);
+      window.removeEventListener("focus", restore);
+    };
+  }, [offerTo]);
 
   const liveMicStream = useCallback(() => {
     const stream = audioStreamRef.current;
@@ -651,10 +706,19 @@ export function useAnalysisRoom({
   const clearError = useCallback(() => setError(null), []);
 
   const stopScreenShare = useCallback(async () => {
+    unwatchDisplayRef.current?.();
+    unwatchDisplayRef.current = null;
+    const lock = wakeLockRef.current;
+    wakeLockRef.current = null;
+    void lock?.release().catch(() => undefined);
+
+    const wasSharing = isSharingRef.current || Boolean(screenStreamRef.current);
     screenStreamRef.current?.getTracks().forEach((track) => track.stop());
     screenStreamRef.current = null;
+    isSharingRef.current = false;
     await playVideo(localVideoRef.current, null);
     setIsSharing(false);
+    if (!wasSharing) return;
     for (const slot of peersRef.current.values()) {
       if (slot.videoSender) await slot.videoSender.replaceTrack(null);
     }
@@ -663,26 +727,31 @@ export function useAnalysisRoom({
 
   const startScreenShare = useCallback(async () => {
     if (!canShareScreen) return false;
+    if (shouldUpgradeToHttps()) {
+      upgradeToHttps("share");
+      return false;
+    }
     try {
-      if (shouldUpgradeToHttps()) {
-        upgradeToHttps("share");
-        return false;
-      }
       const stream = await captureDisplay();
-      const videoTrack = stream.getVideoTracks()[0];
+      const videoTrack = stream.getVideoTracks().find((track) => track.readyState === "live");
       if (!videoTrack) {
         stream.getTracks().forEach((track) => track.stop());
         setShareHint("Não foi possível capturar a tela.");
         return false;
       }
+
+      unwatchDisplayRef.current?.();
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current = stream;
+      isSharingRef.current = true;
       setIsSharing(true);
       setShareHint(null);
       setError(null);
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => resolve());
+
+      unwatchDisplayRef.current = watchDisplayCaptureEnd(stream, () => {
+        void stopScreenShare();
       });
+
       await playVideo(localVideoRef.current, stream);
       socketRef.current?.emit("screen-share-start", { analysisId: channelIdRef.current });
 
@@ -695,9 +764,18 @@ export function useAnalysisRoom({
         }
       }
 
-      videoTrack.addEventListener("ended", () => {
-        void stopScreenShare();
-      });
+      try {
+        const lock = await navigator.wakeLock?.request("screen");
+        if (lock) {
+          wakeLockRef.current = lock;
+          lock.addEventListener("release", () => {
+            if (wakeLockRef.current === lock) wakeLockRef.current = null;
+          });
+        }
+      } catch {
+        // Wake Lock é opcional; a captura continua.
+      }
+
       return true;
     } catch (err) {
       if (shouldUpgradeToHttps()) {
@@ -715,8 +793,13 @@ export function useAnalysisRoom({
       releaseMic(false);
       setMicHint(null);
     }
+    unwatchDisplayRef.current?.();
+    unwatchDisplayRef.current = null;
+    void wakeLockRef.current?.release().catch(() => undefined);
+    wakeLockRef.current = null;
     screenStreamRef.current?.getTracks().forEach((track) => track.stop());
     screenStreamRef.current = null;
+    isSharingRef.current = false;
     teardownAllPeers();
     setJoined(false);
     setParticipants([]);
@@ -801,6 +884,8 @@ export function useAnalysisRoom({
       speakingSourceRef.current?.disconnect();
       audioStreamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      unwatchDisplayRef.current?.();
+      void wakeLockRef.current?.release().catch(() => undefined);
       void audioContextRef.current?.close();
     };
   }, []);

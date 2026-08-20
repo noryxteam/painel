@@ -86,6 +86,8 @@ function ParticipantTile({
   speaking,
   color,
   className,
+  compact,
+  style,
 }: {
   name?: string;
   muted: boolean;
@@ -93,21 +95,29 @@ function ParticipantTile({
   speaking?: boolean;
   color: string;
   className?: string;
+  compact?: boolean;
+  style?: React.CSSProperties;
 }) {
   return (
     <div
       className={cn(
-        "relative flex items-center justify-center overflow-hidden rounded-2xl",
+        "relative flex min-h-0 items-center justify-center overflow-hidden rounded-2xl transition-all duration-300 ease-out",
         speaking && "speaking-glow",
         className,
       )}
-      style={{ backgroundColor: color }}
+      style={{ backgroundColor: color, ...style }}
     >
-      <span className="flex h-[4.75rem] w-[4.75rem] items-center justify-center overflow-hidden rounded-full bg-black/25 sm:h-24 sm:w-24">
-        <User className="h-9 w-9 text-white/90 sm:h-11 sm:w-11" />
+      <span className={cn(
+        "flex items-center justify-center overflow-hidden rounded-full bg-black/25",
+        compact ? "h-10 w-10" : "h-[4.75rem] w-[4.75rem] sm:h-24 sm:w-24",
+      )}>
+        <User className={cn("text-white/90", compact ? "h-5 w-5" : "h-9 w-9 sm:h-11 sm:w-11")} />
       </span>
       {name ? (
-        <span className="absolute bottom-3 left-1/2 flex max-w-[88%] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/75 px-2.5 py-1 text-[11px] font-medium text-white">
+        <span className={cn(
+          "absolute left-1/2 flex max-w-[88%] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/75 font-medium text-white",
+          compact ? "bottom-2 px-2 py-0.5 text-[10px]" : "bottom-3 px-2.5 py-1 text-[11px]",
+        )}>
           {deafened ? (
             <HeadphoneOff className="h-3.5 w-3.5 shrink-0" />
           ) : muted ? (
@@ -165,6 +175,10 @@ function ScreenShareTile({
   onWatch,
   onStop,
   onExpand,
+  expanded,
+  portrait,
+  className,
+  style,
 }: {
   self: boolean;
   watching: boolean;
@@ -174,16 +188,30 @@ function ScreenShareTile({
   onWatch: () => void;
   onStop?: () => void;
   onExpand?: () => void;
+  expanded?: boolean;
+  portrait?: boolean;
+  className?: string;
+  style?: React.CSSProperties;
 }) {
+  const videoFit = expanded && portrait ? "object-cover" : "object-contain";
   return (
-    <div className="relative h-full min-h-0 overflow-hidden rounded-2xl bg-black">
+    <div
+      className={cn(
+        "relative min-h-0 overflow-hidden rounded-2xl bg-black transition-all duration-300 ease-out",
+        expanded && "z-10",
+        expanded && portrait && "rounded-none",
+        expanded && !portrait && "rounded-none",
+        className,
+      )}
+      style={style}
+    >
       {self ? (
         <video
           ref={localVideoRef}
           autoPlay
           muted
           playsInline
-          className="pointer-events-none absolute h-0 w-0 opacity-0"
+          className={cn("h-full w-full", videoFit)}
         />
       ) : (
         <video
@@ -193,12 +221,12 @@ function ScreenShareTile({
           muted={!watching}
           className={cn(
             "h-full w-full",
-            watching ? "object-contain" : "scale-105 object-cover",
+            watching || self || expanded ? videoFit : "scale-105 object-cover",
           )}
         />
       )}
       {self && (
-        <p className="absolute inset-0 flex items-center justify-center px-3 text-center text-sm font-semibold leading-snug text-white">
+        <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-3 text-center text-sm font-semibold leading-snug text-white">
           Você está compartilhando sua tela!
         </p>
       )}
@@ -229,29 +257,104 @@ function ScreenShareTile({
           <X className="h-4 w-4" />
         </button>
       )}
+      {!self && (
+        <span className="absolute bottom-2 left-2 z-20 flex max-w-[70%] items-center gap-1.5 rounded-full bg-black/80 px-2 py-1 text-[11px] font-medium text-white">
+          <Monitor className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{name}</span>
+        </span>
+      )}
+      {self && (
+        <span className="absolute bottom-2 left-2 z-20 flex max-w-[70%] items-center gap-1.5 rounded-full bg-black/80 px-2 py-1 text-[11px] font-medium text-white">
+          <Smartphone className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{name}</span>
+        </span>
+      )}
       {onExpand && (
         <button
           type="button"
-          className="absolute right-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white"
-          aria-label="Tela cheia"
+          className="absolute bottom-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-md bg-black/70 text-white"
+          aria-label={expanded ? "Sair da tela cheia" : "Tela cheia"}
           onClick={(event) => {
             event.stopPropagation();
             onExpand();
           }}
         >
-          <Maximize2 className="h-4 w-4" />
+          {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
       )}
-      <span className="absolute bottom-2 left-1/2 z-20 flex max-w-[90%] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/80 px-2.5 py-1 text-[11px] font-medium text-white">
-        {self ? (
-          <Smartphone className="h-3.5 w-3.5 shrink-0" />
-        ) : (
-          <Monitor className="h-3.5 w-3.5 shrink-0" />
-        )}
-        <span className="truncate">{name}</span>
-      </span>
     </div>
   );
+}
+
+function sharePersonCell(index: number, count: number, portrait: boolean) {
+  if (!portrait) {
+    return {
+      gridColumn: (index % 2) + 1,
+      gridRow: 2 + Math.floor(index / 2),
+    };
+  }
+  if (count <= 2) {
+    return { gridColumn: index + 1, gridRow: 2 };
+  }
+  if (index === 0) return { gridColumn: 2, gridRow: 1 };
+  if (count === 3) {
+    return index === 1 ? { gridColumn: 1, gridRow: 3 } : { gridColumn: 2, gridRow: 3 };
+  }
+  if (index === 1) return { gridColumn: 2, gridRow: 2 };
+  const rest = index - 2;
+  return {
+    gridColumn: (rest % 2) + 1,
+    gridRow: 3 + Math.floor(rest / 2),
+  };
+}
+
+function shareTelaStyle(portrait: boolean, count: number, expanded: boolean) {
+  if (expanded) {
+    return { gridColumn: "1 / -1", gridRow: "1 / -1" };
+  }
+  if (!portrait) {
+    return { gridColumn: "1 / -1", gridRow: 1 };
+  }
+  if (count <= 2) {
+    return { gridColumn: "1 / -1", gridRow: 1 };
+  }
+  return { gridColumn: 1, gridRow: "1 / span 2" };
+}
+
+function shareGridStyle(portrait: boolean, count: number, expanded: boolean): React.CSSProperties {
+  if (expanded) {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      gridTemplateRows: "minmax(0, 1fr)",
+    };
+  }
+  if (!portrait) {
+    const rows = Math.max(0, Math.ceil(count / 2));
+    return {
+      gridTemplateColumns: count <= 1 ? "minmax(0, 1fr) minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)",
+      gridTemplateRows:
+        rows === 0
+          ? "minmax(0, 1fr)"
+          : `minmax(0, 1.35fr) repeat(${rows}, minmax(0, 1fr))`,
+    };
+  }
+  if (count <= 0) {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      gridTemplateRows: "minmax(0, 1fr)",
+    };
+  }
+  if (count <= 2) {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+      gridTemplateRows: "minmax(0, 1.65fr) minmax(0, 1fr)",
+    };
+  }
+  const extra = count === 3 ? 1 : Math.ceil((count - 2) / 2);
+  return {
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    gridTemplateRows: `repeat(${2 + extra}, minmax(0, 1fr))`,
+  };
 }
 
 interface VoiceRoomProps {
@@ -728,6 +831,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   const chromeTimer = useRef(0);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const autoFullscreenRef = useRef(false);
   const [wantMic, setWantMic] = useState(false);
   const [wantShare, setWantShare] = useState(false);
@@ -983,15 +1087,40 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
 
   const canWatch = session.hasRemoteStream && !session.isSharing;
   const mobileShare = isMobile && inCall && (session.isSharing || canWatch);
-  const showStream =
-    (!isMobile && (session.isSharing || canWatch)) || (isMobile && streamFocus && (session.isSharing || isWatching));
+  const showStream = !isMobile && (session.isSharing || canWatch);
   const showPip =
-    isMobile && inCall && !isFullscreen && isWatching && Boolean(session.remoteStream);
+    isMobile &&
+    inCall &&
+    !isFullscreen &&
+    !mobileShare &&
+    isWatching &&
+    Boolean(session.remoteStream);
   const sharerName =
     people.find((person) => person.isSharing && person.userId !== access.userId)?.userName ||
     userName ||
     "teste";
-  const stageRef = useRef<HTMLDivElement>(null);
+  const [sharePortrait, setSharePortrait] = useState(false);
+
+  useEffect(() => {
+    if (!mobileShare) return;
+    const video = session.isSharing
+      ? session.localVideoRef.current
+      : session.remoteVideoRef.current;
+    const read = () => {
+      const width = video?.videoWidth ?? 0;
+      const height = video?.videoHeight ?? 0;
+      if (width && height) setSharePortrait(height > width);
+    };
+    read();
+    video?.addEventListener("loadedmetadata", read);
+    video?.addEventListener("resize", read);
+    const timer = window.setInterval(read, 400);
+    return () => {
+      video?.removeEventListener("loadedmetadata", read);
+      video?.removeEventListener("resize", read);
+      window.clearInterval(timer);
+    };
+  }, [mobileShare, session.isSharing, isWatching, streamFocus, session.localVideoRef, session.remoteVideoRef]);
   const [cardSize, setCardSize] = useState<{ width: number; height: number } | null>(
     null,
   );
@@ -1056,8 +1185,6 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     setIsWatching(true);
     if (isMobile) {
       if (focus) setStreamFocus(true);
-      setIsFullscreen(true);
-      showChrome(30_000);
       return;
     }
     setIsFullscreen(true);
@@ -1178,22 +1305,20 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               onClick={(event) => event.stopPropagation()}
             >
               <p>{session.shareHint ?? "Toque para o celular pedir a transmissão de tela."}</p>
-              {!session.shareHint?.includes("não pede transmissão de tela") && (
-                <button
-                  type="button"
-                  className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void session.startScreenShare().then((ok) => {
-                      if (!ok) return;
-                      setIsFullscreen(true);
-                      showChrome(isMobile ? 30_000 : 2_000);
-                    });
-                  }}
-                >
-                  Permitir tela
-                </button>
-              )}
+              <button
+                type="button"
+                className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void session.startScreenShare().then((ok) => {
+                    if (!ok) return;
+                    setIsFullscreen(true);
+                    showChrome(isMobile ? 30_000 : 2_000);
+                  });
+                }}
+              >
+                Transmitir tela
+              </button>
             </div>
           )}
         </div>
@@ -1300,7 +1425,10 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
             isFullscreen
               ? cn(
                   "overflow-hidden",
-                  isMobile && "px-3 pb-2 pt-1",
+                  isMobile &&
+                    (streamFocus && sharePortrait
+                      ? "px-0 pb-2 pt-1"
+                      : "px-3 pb-2 pt-1"),
                 )
               : showStream
                 ? "overflow-hidden px-3 pb-2 sm:px-6"
@@ -1376,19 +1504,6 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                 </span>
               </>
             )}
-            {isMobile && streamFocus && (
-              <button
-                type="button"
-                className="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-md bg-black/55 text-white"
-                aria-label="Sair da tela cheia"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setStreamFocus(false);
-                }}
-              >
-                <Minimize2 className="h-4 w-4" />
-              </button>
-            )}
             </>
             )}
 
@@ -1420,14 +1535,20 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               ) : (
                 <div
                   className={cn(
-                    "grid min-h-0 w-full gap-2 sm:gap-3",
-                    isMobile ? "h-full auto-rows-fr" : "h-full",
-                    participantGridClass(
-                      people.length + (mobileShare ? 1 : 0),
-                      isMobile,
-                      mobileShare,
-                    ),
+                    "grid min-h-0 w-full gap-2 transition-all duration-300 ease-out sm:gap-3",
+                    isMobile ? "h-full" : "h-full",
+                    !mobileShare &&
+                      participantGridClass(
+                        people.length + (mobileShare ? 1 : 0),
+                        isMobile,
+                        mobileShare,
+                      ),
                   )}
+                  style={
+                    mobileShare
+                      ? shareGridStyle(sharePortrait, people.length, streamFocus)
+                      : undefined
+                  }
                 >
                   {mobileShare && (
                     <ScreenShareTile
@@ -1436,6 +1557,8 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                       name={session.isSharing ? userName : sharerName}
                       localVideoRef={session.localVideoRef}
                       remoteVideoRef={session.remoteVideoRef}
+                      expanded={streamFocus}
+                      portrait={sharePortrait}
                       onWatch={() => startWatching()}
                       onStop={
                         session.isSharing
@@ -1443,9 +1566,14 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                           : undefined
                       }
                       onExpand={() => {
+                        if (streamFocus) {
+                          setStreamFocus(false);
+                          return;
+                        }
                         if (session.isSharing || isWatching) setStreamFocus(true);
                         else startWatching(true);
                       }}
+                      style={shareTelaStyle(sharePortrait, people.length, streamFocus)}
                     />
                   )}
                   {people.map((participant, index) => (
@@ -1456,13 +1584,21 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                       deafened={Boolean(participant.deafened)}
                       speaking={Boolean(participant.speaking)}
                       color={TILE_COLORS[index % TILE_COLORS.length]}
+                      compact={mobileShare && people.length > 4}
                       className={cn(
                         "h-full min-h-0",
+                        streamFocus && mobileShare && "hidden",
                         isMobile &&
-                          (people.length + (mobileShare ? 1 : 0)) % 2 === 1 &&
+                          !mobileShare &&
+                          people.length % 2 === 1 &&
                           index === people.length - 1 &&
                           "col-span-2 mx-auto w-[calc(50%-0.25rem)]",
                       )}
+                      style={
+                        mobileShare
+                          ? sharePersonCell(index, people.length, sharePortrait)
+                          : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -1586,6 +1722,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               {isWatching ? <EyeOff className="h-6 w-6" /> : <Eye className="h-6 w-6" />}
             </ControlButton>
           )}
+          {!isMobile && (
           <ControlButton
             label={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
             onClick={toggleFullscreen}
@@ -1596,6 +1733,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               <Maximize2 className="h-6 w-6" />
             )}
           </ControlButton>
+          )}
           <ControlButton label="Desligar" danger onClick={() => void leaveAndGo()}>
             <PhoneOff className="h-6 w-6" />
           </ControlButton>
