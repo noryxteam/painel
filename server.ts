@@ -5,7 +5,7 @@ import { parse } from "url";
 import { initSocketServer } from "./src/server/socket";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = "localhost";
+const hostname = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
 
 const app = next({ dev, hostname, port, webpack: true });
@@ -29,6 +29,6 @@ app.prepare().then(() => {
   });
 
   server.listen(port, "0.0.0.0", () => {
-    console.log(`> SAP BETA pronto em http://localhost:${port}`);
+    console.log(`> SAP BETA pronto em http://0.0.0.0:${port}`);
   });
 });
