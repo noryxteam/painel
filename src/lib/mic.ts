@@ -64,25 +64,33 @@ export async function captureMicrophone(inputDeviceId?: string) {
 
 export async function captureDisplay() {
   const media = navigator.mediaDevices;
-  if (!window.isSecureContext || !media?.getDisplayMedia) {
+  if (!window.isSecureContext) {
+    throw new Error("INSECURE_CONTEXT");
+  }
+  if (!media?.getDisplayMedia) {
     throw new Error("DISPLAY_UNSUPPORTED");
   }
-  try {
-    return await media.getDisplayMedia({
-      video: true,
-      audio: false,
-    });
-  } catch (first) {
-    if (first instanceof Error && first.name === "NotAllowedError") throw first;
-    return media.getDisplayMedia({
+  const attempts: DisplayMediaStreamOptions[] = [
+    { video: true, audio: false },
+    {
       video: {
         frameRate: { ideal: 30, max: 60 },
         width: { ideal: 1920 },
         height: { ideal: 1080 },
       },
       audio: false,
-    });
+    },
+  ];
+  let last: unknown;
+  for (const constraints of attempts) {
+    try {
+      return await media.getDisplayMedia(constraints);
+    } catch (error) {
+      if (error instanceof Error && error.name === "NotAllowedError") throw error;
+      last = error;
+    }
   }
+  throw last instanceof Error ? last : new Error("DISPLAY_UNSUPPORTED");
 }
 
 export function describeMicError(error: unknown) {
@@ -102,6 +110,9 @@ export function describeMicError(error: unknown) {
 export function describeShareError(error: unknown) {
   const name = error instanceof Error ? error.name : "";
   const message = error instanceof Error ? error.message : "";
+  if (message === "INSECURE_CONTEXT") {
+    return "Toque em Permitir tela para o celular pedir o acesso.";
+  }
   if (message === "DISPLAY_UNSUPPORTED") {
     return "Este celular não transmite tela. Transmita pelo computador.";
   }

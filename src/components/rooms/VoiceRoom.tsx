@@ -277,8 +277,10 @@ function RoomSidebar({
   callStartedAt,
   isMicOn,
   isDeafened,
+  isSharing,
   onMic,
   onDeafen,
+  onShare,
   audio,
   onAudioChange,
   onSelectRoom,
@@ -291,8 +293,10 @@ function RoomSidebar({
   callStartedAt?: number | null;
   isMicOn?: boolean;
   isDeafened?: boolean;
+  isSharing?: boolean;
   onMic?: () => void;
   onDeafen?: () => void;
+  onShare?: () => void;
   onSelectRoom?: (item: SidebarRoom) => void;
   initialRooms?: SidebarRoom[];
   audio?: {
@@ -503,6 +507,21 @@ function RoomSidebar({
               type="button"
               className={cn(
                 "rounded-md p-2 hover:bg-[#2e2f34] sm:p-1.5",
+                isSharing && "bg-[#3f292d] text-red-400 hover:bg-[#4a3136]",
+              )}
+              title="Transmitir tela"
+              onClick={onShare}
+            >
+              {isSharing ? (
+                <MonitorOff className="h-4 w-4" />
+              ) : (
+                <Monitor className="h-4 w-4" />
+              )}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "rounded-md p-2 hover:bg-[#2e2f34] sm:p-1.5",
                 isDeafened && "bg-[#3f292d] text-red-400 hover:bg-[#4a3136]",
               )}
               title="Fone"
@@ -621,6 +640,17 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   const hideChrome = () => {
     window.clearTimeout(chromeTimer.current);
     setChromeVisible(false);
+  };
+
+  const shareScreen = async () => {
+    if (session.isSharing) {
+      await session.stopScreenShare();
+      return;
+    }
+    const ok = await session.startScreenShare();
+    if (!ok) return;
+    setIsFullscreen(true);
+    showChrome(isMobile ? 30_000 : 2_000);
   };
 
   const enterRoom = (item: SidebarRoom) => {
@@ -956,7 +986,11 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
                 className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
                 onClick={(event) => {
                   event.stopPropagation();
-                  void session.startScreenShare();
+                  void session.startScreenShare().then((ok) => {
+                    if (!ok) return;
+                    setIsFullscreen(true);
+                    showChrome(isMobile ? 30_000 : 2_000);
+                  });
                 }}
               >
                 Permitir tela
@@ -982,11 +1016,15 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
         initialRooms={initialRooms}
         isMicOn={session.isMicOn}
         isDeafened={session.isDeafened}
+        isSharing={session.isSharing}
         onMic={() => {
           session.unlockAudio();
           void session.toggleMic();
         }}
         onDeafen={session.toggleDeafen}
+        onShare={() => {
+          void shareScreen();
+        }}
         onSelectRoom={enterRoom}
         audio={audio}
         onAudioChange={(patch) => {
@@ -1058,7 +1096,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               playsInline
               className={
                 session.isSharing
-                  ? "h-full w-full object-contain"
+                  ? "h-full w-full bg-black object-contain"
                   : "pointer-events-none absolute h-0 w-0 opacity-0"
               }
             />
@@ -1073,7 +1111,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               }
             />
 
-            {!inCall ? (
+            {!inCall && !showStream ? (
               <div className="flex h-full w-full flex-col items-center justify-center px-4 text-center sm:px-6">
                 <p className="text-base font-medium text-zinc-200 sm:text-lg">
                   Você não está em nenhuma call
@@ -1160,7 +1198,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               session.isSharing ? "Parar de transmitir tela" : "Transmitir tela"
             }
             onClick={
-              session.isSharing ? session.stopScreenShare : session.startScreenShare
+              session.isSharing ? () => void session.stopScreenShare() : () => void shareScreen()
             }
           >
             {session.isSharing ? (

@@ -39,14 +39,21 @@ const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 
 async function playVideo(video: HTMLVideoElement | null, stream: MediaStream | null) {
   if (!video) return;
-  if (video.srcObject !== stream) video.srcObject = stream;
-  if (stream) {
-    try {
-      await video.play();
-    } catch {
-      // Autoplay pode esperar o próximo clique do usuário.
-    }
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.setAttribute("playsinline", "true");
+  video.setAttribute("webkit-playsinline", "true");
+  if (!stream) {
+    video.srcObject = null;
+    return;
   }
+  if (video.srcObject !== stream) video.srcObject = stream;
+  const tryPlay = () => video.play().catch(() => undefined);
+  video.onloadedmetadata = () => {
+    void tryPlay();
+  };
+  await tryPlay();
 }
 
 export function useAnalysisRoom({
@@ -406,7 +413,10 @@ export function useAnalysisRoom({
 
   useEffect(() => {
     if (!isSharing) return;
-    void playVideo(localVideoRef.current, screenStreamRef.current);
+    const timer = window.setTimeout(() => {
+      void playVideo(localVideoRef.current, screenStreamRef.current);
+    }, 50);
+    return () => window.clearTimeout(timer);
   }, [isSharing]);
 
   const startSpeakingMonitor = useCallback(
@@ -533,17 +543,20 @@ export function useAnalysisRoom({
   const clearError = useCallback(() => setError(null), []);
 
   const startScreenShare = async () => {
-    if (!canShareScreen) return;
+    if (!canShareScreen) return false;
     try {
       if (shouldUpgradeToHttps()) {
         upgradeToHttps("share");
-        return;
+        return false;
       }
       const stream = await captureDisplay();
       screenStreamRef.current = stream;
       setIsSharing(true);
       setShareHint(null);
       setError(null);
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
       await playVideo(localVideoRef.current, stream);
       socket?.emit("screen-share-start", { analysisId: channelId });
 
@@ -559,12 +572,14 @@ export function useAnalysisRoom({
       stream.getVideoTracks()[0]?.addEventListener("ended", () => {
         void stopScreenShare();
       });
+      return true;
     } catch (err) {
       if (shouldUpgradeToHttps()) {
         upgradeToHttps("share");
-        return;
+        return false;
       }
       setShareHint(describeShareError(err));
+      return false;
     }
   };
 
