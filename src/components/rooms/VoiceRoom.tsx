@@ -687,11 +687,17 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     window.history.pushState(null, "", `/salas/${item.id}?n=${item.number}`);
   };
 
+  const joinedMicForRoom = useRef("");
   useEffect(() => {
-    if (idle || !session.joined) return;
+    if (idle || !session.joined || !room.id) {
+      if (idle) joinedMicForRoom.current = "";
+      return;
+    }
     session.unlockAudio();
+    if (joinedMicForRoom.current === room.id) return;
+    joinedMicForRoom.current = room.id;
     void session.enableMic();
-  }, [idle, session.joined, session.enableMic, session.unlockAudio]);
+  }, [idle, room.id, session.joined, session.enableMic, session.unlockAudio]);
 
   const inCall = !idle && Boolean(room.id);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
@@ -1176,6 +1182,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
         >
           <ControlButton
             label="Microfone"
+            danger={!session.isMicOn}
             onClick={() => {
               session.unlockAudio();
               void session.toggleMic();

@@ -33,6 +33,8 @@ interface PeerSlot {
   remoteReady: boolean;
   makingOffer: boolean;
   audioEl: HTMLAudioElement;
+  audioSender: RTCRtpSender | null;
+  videoSender: RTCRtpSender | null;
 }
 
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -81,6 +83,7 @@ export function useAnalysisRoom({
   const monitoredStreamRef = useRef<MediaStream | null>(null);
   const isDeafenedRef = useRef(false);
   const isMicOnRef = useRef(false);
+  const userWantsMicRef = useRef(true);
   const channelIdRef = useRef(channelId);
   const socketRef = useRef(socket);
   channelIdRef.current = channelId;
@@ -125,20 +128,25 @@ export function useAnalysisRoom({
   }, [teardownPeer]);
 
   const addLocalTracks = useCallback((pc: RTCPeerConnection) => {
+    const slot = Array.from(peersRef.current.values()).find((item) => item.pc === pc);
     const audio = audioStreamRef.current;
-    if (audio) {
-      for (const track of audio.getTracks()) {
-        if (!pc.getSenders().some((sender) => sender.track === track)) {
-          pc.addTrack(track, audio);
-        }
+    const audioTrack = audio?.getAudioTracks().find((track) => track.readyState === "live");
+    if (audio && audioTrack && isMicOnRef.current) {
+      if (slot?.audioSender) {
+        void slot.audioSender.replaceTrack(audioTrack);
+      } else {
+        const sender = pc.addTrack(audioTrack, audio);
+        if (slot) slot.audioSender = sender;
       }
     }
     const screen = screenStreamRef.current;
-    if (screen) {
-      for (const track of screen.getTracks()) {
-        const existing = pc.getSenders().find((sender) => sender.track?.kind === "video");
-        if (existing) void existing.replaceTrack(track);
-        else pc.addTrack(track, screen);
+    const videoTrack = screen?.getVideoTracks().find((track) => track.readyState === "live");
+    if (screen && videoTrack) {
+      if (slot?.videoSender) {
+        void slot.videoSender.replaceTrack(videoTrack);
+      } else {
+        const sender = pc.addTrack(videoTrack, screen);
+        if (slot) slot.videoSender = sender;
       }
     }
   }, []);
@@ -186,6 +194,8 @@ export function useAnalysisRoom({
         remoteReady: false,
         makingOffer: false,
         audioEl,
+        audioSender: null,
+        videoSender: null,
       };
       peersRef.current.set(remoteId, slot);
       addLocalTracks(pc);
@@ -532,20 +542,45 @@ export function useAnalysisRoom({
 
   const attachMicToPeers = useCallback(
     (stream: MediaStream) => {
+      const track = stream.getAudioTracks().find((item) => item.readyState === "live");
+      if (!track) return;
       for (const [remoteId, slot] of peersRef.current) {
-        for (const track of stream.getTracks()) {
-          if (!slot.pc.getSenders().some((sender) => sender.track === track)) {
-            slot.pc.addTrack(track, stream);
-          }
+        if (slot.audioSender) {
+          void slot.audioSender.replaceTrack(track);
+          continue;
         }
+        slot.audioSender = slot.pc.addTrack(track, stream);
         void offerTo(remoteId);
       }
     },
     [offerTo],
   );
 
+  const releaseMic = useCallback((userOff = false) => {
+    if (userOff) userWantsMicRef.current = false;
+    isMicOnRef.current = false;
+    setIsMicOn(false);
+    setIsSpeaking(false);
+    if (speakingTimerRef.current) {
+      window.clearTimeout(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
+    speakingSourceRef.current?.disconnect();
+    speakingSourceRef.current = null;
+    monitoredStreamRef.current = null;
+    audioStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = false;
+      track.stop();
+    });
+    audioStreamRef.current = null;
+    for (const slot of peersRef.current.values()) {
+      if (slot.audioSender) void slot.audioSender.replaceTrack(null);
+    }
+  }, []);
+
   const enableMic = useCallback(async () => {
     if (isDeafenedRef.current) return false;
+    if (!userWantsMicRef.current) return false;
     await ensureAudioContext();
     const existing = liveMicStream();
     if (existing) {
@@ -593,22 +628,18 @@ export function useAnalysisRoom({
 
   const toggleMic = useCallback(async () => {
     if (isDeafenedRef.current) return;
-    if (audioStreamRef.current && isMicOnRef.current) {
-      audioStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = false;
-      });
-      isMicOnRef.current = false;
-      setIsMicOn(false);
-      setIsSpeaking(false);
-      socket?.emit("media-state", {
-        analysisId: channelId,
+    if (isMicOnRef.current) {
+      releaseMic(true);
+      socketRef.current?.emit("media-state", {
+        analysisId: channelIdRef.current,
         micEnabled: false,
         speaking: false,
       });
       return;
     }
+    userWantsMicRef.current = true;
     await enableMic();
-  }, [channelId, enableMic, socket]);
+  }, [enableMic, releaseMic]);
 
   const unlockAudio = useCallback(() => {
     void ensureAudioContext();
@@ -619,7 +650,18 @@ export function useAnalysisRoom({
 
   const clearError = useCallback(() => setError(null), []);
 
-  const startScreenShare = async () => {
+  const stopScreenShare = useCallback(async () => {
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current = null;
+    await playVideo(localVideoRef.current, null);
+    setIsSharing(false);
+    for (const slot of peersRef.current.values()) {
+      if (slot.videoSender) await slot.videoSender.replaceTrack(null);
+    }
+    socketRef.current?.emit("screen-share-stop", { analysisId: channelIdRef.current });
+  }, []);
+
+  const startScreenShare = useCallback(async () => {
     if (!canShareScreen) return false;
     try {
       if (shouldUpgradeToHttps()) {
@@ -627,6 +669,13 @@ export function useAnalysisRoom({
         return false;
       }
       const stream = await captureDisplay();
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) {
+        stream.getTracks().forEach((track) => track.stop());
+        setShareHint("Não foi possível capturar a tela.");
+        return false;
+      }
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current = stream;
       setIsSharing(true);
       setShareHint(null);
@@ -635,18 +684,18 @@ export function useAnalysisRoom({
         requestAnimationFrame(() => resolve());
       });
       await playVideo(localVideoRef.current, stream);
-      socket?.emit("screen-share-start", { analysisId: channelId });
+      socketRef.current?.emit("screen-share-start", { analysisId: channelIdRef.current });
 
       for (const [remoteId, slot] of peersRef.current) {
-        for (const track of stream.getTracks()) {
-          const sender = slot.pc.getSenders().find((item) => item.track?.kind === "video");
-          if (sender) await sender.replaceTrack(track);
-          else slot.pc.addTrack(track, stream);
+        if (slot.videoSender) {
+          await slot.videoSender.replaceTrack(videoTrack);
+        } else {
+          slot.videoSender = slot.pc.addTrack(videoTrack, stream);
+          void offerTo(remoteId);
         }
-        void offerTo(remoteId);
       }
 
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      videoTrack.addEventListener("ended", () => {
         void stopScreenShare();
       });
       return true;
@@ -658,28 +707,12 @@ export function useAnalysisRoom({
       setShareHint(describeShareError(err));
       return false;
     }
-  };
-
-  const stopScreenShare = async () => {
-    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
-    screenStreamRef.current = null;
-    await playVideo(localVideoRef.current, null);
-    setIsSharing(false);
-    for (const slot of peersRef.current.values()) {
-      for (const sender of slot.pc.getSenders()) {
-        if (sender.track?.kind === "video") await sender.replaceTrack(null);
-      }
-    }
-    socket?.emit("screen-share-stop", { analysisId: channelId });
-  };
+  }, [canShareScreen, offerTo, stopScreenShare]);
 
   const leaveRoom = (options?: { keepMic?: boolean }) => {
     socket?.emit("leave-room", { analysisId: channelId });
     if (!options?.keepMic) {
-      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
-      audioStreamRef.current = null;
-      setIsMicOn(false);
-      isMicOnRef.current = false;
+      releaseMic(false);
       setMicHint(null);
     }
     screenStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -711,32 +744,21 @@ export function useAnalysisRoom({
     setIsDeafened(next);
     applyRemoteAudio();
     if (next) {
-      audioStreamRef.current?.getAudioTracks().forEach((track) => {
-        track.enabled = false;
-      });
-      isMicOnRef.current = false;
-      setIsMicOn(false);
-      setIsSpeaking(false);
-      socket?.emit("media-state", {
-        analysisId: channelId,
+      releaseMic(false);
+      socketRef.current?.emit("media-state", {
+        analysisId: channelIdRef.current,
         deafened: true,
         micEnabled: false,
         speaking: false,
       });
       return;
     }
-    audioStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = true;
-    });
-    if (audioStreamRef.current) {
-      isMicOnRef.current = true;
-      setIsMicOn(true);
-    }
-    socket?.emit("media-state", {
-      analysisId: channelId,
+    socketRef.current?.emit("media-state", {
+      analysisId: channelIdRef.current,
       deafened: false,
-      micEnabled: Boolean(audioStreamRef.current),
+      micEnabled: false,
     });
+    if (userWantsMicRef.current) void enableMic();
   };
 
   const updateAudioConfig = (
