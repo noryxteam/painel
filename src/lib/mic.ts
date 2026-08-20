@@ -1,28 +1,7 @@
-export function isSecureMediaContext() {
-  return typeof window !== "undefined" && window.isSecureContext;
-}
-
-export function isInAppBrowser() {
-  if (typeof navigator === "undefined") return false;
-  return /WhatsApp|FBAN|FBAV|Instagram|Line\/|Twitter/i.test(navigator.userAgent);
-}
-
-export function httpsAppUrl() {
-  if (typeof window === "undefined") return "";
-  const { hostname, pathname, search, hash, protocol } = window.location;
-  if (protocol === "https:") return window.location.href;
-  const configured = process.env.NEXT_PUBLIC_HTTPS_PORT ?? "3443";
-  const port = configured === "443" ? "" : `:${configured}`;
-  return `https://${hostname}${port}${pathname}${search}${hash}`;
-}
-
 export async function captureMicrophone(inputDeviceId?: string) {
   const media = navigator.mediaDevices;
   if (!media?.getUserMedia) {
-    const error = new Error(
-      isSecureMediaContext() ? "MEDIA_UNSUPPORTED" : "INSECURE_CONTEXT",
-    );
-    throw error;
+    throw new Error("INSECURE_CONTEXT");
   }
 
   const attempts: MediaStreamConstraints[] = [];
@@ -58,16 +37,31 @@ export async function captureMicrophone(inputDeviceId?: string) {
   throw last instanceof Error ? last : new Error("MIC_DENIED");
 }
 
+export async function captureDisplay() {
+  const media = navigator.mediaDevices;
+  if (!media?.getDisplayMedia) {
+    throw new Error("DISPLAY_UNSUPPORTED");
+  }
+  try {
+    return await media.getDisplayMedia({
+      video: true,
+      audio: false,
+    });
+  } catch (first) {
+    if (first instanceof Error && first.name === "NotAllowedError") throw first;
+    return media.getDisplayMedia({
+      video: {
+        frameRate: { ideal: 30, max: 60 },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+  }
+}
+
 export function describeMicError(error: unknown) {
   const name = error instanceof Error ? error.name : "";
-  const message = error instanceof Error ? error.message : "";
-
-  if (isInAppBrowser()) {
-    return "O WhatsApp bloqueia o microfone. Toque abaixo para abrir no Safari.";
-  }
-  if (message === "INSECURE_CONTEXT" || !isSecureMediaContext()) {
-    return "O celular só libera o microfone em conexão segura. Toque abaixo para abrir.";
-  }
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
     return "Toque em Permitir quando o celular pedir o microfone.";
   }
@@ -75,7 +69,19 @@ export function describeMicError(error: unknown) {
     return "Nenhum microfone encontrado neste aparelho.";
   }
   if (name === "NotReadableError" || name === "TrackStartError") {
-    return "O microfone está em uso por outro app. Feche o app e tente de novo.";
+    return "O microfone está em uso por outro app. Feche o app e toque de novo.";
   }
-  return "Toque abaixo e permita o microfone para falar na call.";
+  return "Toque no microfone e permita o acesso para falar.";
+}
+
+export function describeShareError(error: unknown) {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  if (message === "DISPLAY_UNSUPPORTED") {
+    return "Este celular não transmite tela. Transmita pelo computador.";
+  }
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    return "Toque em Permitir quando o celular pedir para transmitir a tela.";
+  }
+  return "Toque em transmitir tela e permita quando o celular perguntar.";
 }

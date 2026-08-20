@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { captureMicrophone, describeMicError } from "@/lib/mic";
+import { captureDisplay, captureMicrophone, describeMicError, describeShareError } from "@/lib/mic";
 
 export interface RoomParticipant {
   userId: string;
@@ -92,6 +92,7 @@ export function useAnalysisRoom({
   const [joined, setJoined] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [micHint, setMicHint] = useState<string | null>(null);
+  const [shareHint, setShareHint] = useState<string | null>(null);
   const [removedReason, setRemovedReason] = useState<string | null>(null);
 
   const teardownPeer = useCallback((remoteId: string) => {
@@ -460,15 +461,6 @@ export function useAnalysisRoom({
 
   const enableMic = useCallback(async () => {
     if (isDeafenedRef.current) return false;
-    try {
-      const Ctor =
-        window.AudioContext ||
-        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      if (Ctor) void new Ctor().resume();
-    } catch {
-      // Alguns browsers bloqueiam AudioContext até o toque; o getUserMedia segue.
-    }
     if (audioStreamRef.current) {
       audioStreamRef.current.getAudioTracks().forEach((track) => {
         track.enabled = true;
@@ -482,6 +474,15 @@ export function useAnalysisRoom({
 
     try {
       const stream = await captureMicrophone(audioConfigRef.current.inputDeviceId);
+      try {
+        const Ctor =
+          window.AudioContext ||
+          (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+        if (Ctor) void new Ctor().resume();
+      } catch {
+        // Áudio da call segue mesmo se o medidor não iniciar.
+      }
       audioStreamRef.current = stream;
       isMicOnRef.current = true;
       setIsMicOn(true);
@@ -524,21 +525,15 @@ export function useAnalysisRoom({
   const clearError = useCallback(() => setError(null), []);
 
   const startScreenShare = async () => {
-    if (!canShareScreen || !socket) return;
+    if (!canShareScreen) return;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          frameRate: { ideal: 30, max: 60 },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
+      const stream = await captureDisplay();
       screenStreamRef.current = stream;
       setIsSharing(true);
+      setShareHint(null);
       setError(null);
       await playVideo(localVideoRef.current, stream);
-      socket.emit("screen-share-start", { analysisId: channelId });
+      socket?.emit("screen-share-start", { analysisId: channelId });
 
       for (const [remoteId, slot] of peersRef.current) {
         for (const track of stream.getTracks()) {
@@ -553,9 +548,7 @@ export function useAnalysisRoom({
         void stopScreenShare();
       });
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Não foi possível compartilhar tela",
-      );
+      setShareHint(describeShareError(err));
     }
   };
 
@@ -688,6 +681,7 @@ export function useAnalysisRoom({
     joined,
     error,
     micHint,
+    shareHint,
     removedReason,
     startScreenShare,
     stopScreenShare,

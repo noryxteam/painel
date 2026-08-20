@@ -23,7 +23,6 @@ import { AudioSettingsPanel, ControlButton } from "@/components/rooms/AudioSetti
 import { useAnalysisRoom } from "@/hooks/useAnalysisRoom";
 import { useSocket } from "@/hooks/useSocket";
 import { formatOccupancy } from "@/lib/format";
-import { httpsAppUrl, isInAppBrowser, isSecureMediaContext } from "@/lib/mic";
 import { isEmuRoom, isMobRoom, isSupRoom, roomTitle } from "@/lib/room-names";
 import { cn } from "@/lib/utils";
 
@@ -905,7 +904,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
       )}
       onClick={onSurfaceClick}
     >
-      {(session.micHint || session.error) && (
+      {(session.micHint || session.shareHint || session.error) && (
         <div className="absolute inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex flex-col items-center gap-2">
           {session.error && (
             <div className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-red-200 ring-1 ring-red-500/30">
@@ -925,29 +924,35 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
               onClick={(event) => event.stopPropagation()}
             >
               <p>{session.micHint}</p>
-              <a
-                href={httpsAppUrl() || "#"}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
                 className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (isSecureMediaContext() && !isInAppBrowser()) {
-                    event.preventDefault();
-                    session.unlockAudio();
-                    void session.enableMic();
-                  }
+                  session.unlockAudio();
+                  void session.enableMic();
                 }}
               >
-                {isInAppBrowser() || !isSecureMediaContext()
-                  ? "Abrir no Safari e falar"
-                  : "Ativar microfone"}
-              </a>
-              {(isInAppBrowser() || !isSecureMediaContext()) && (
-                <p className="mt-2 text-[11px] text-zinc-400">
-                  Se o iPhone avisar que o site não é seguro, toque em Avançar e Visitar.
-                </p>
-              )}
+                Permitir microfone
+              </button>
+            </div>
+          )}
+          {session.shareHint && (
+            <div
+              className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p>{session.shareHint}</p>
+              <button
+                type="button"
+                className="mt-3 inline-flex rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void session.startScreenShare();
+                }}
+              >
+                Permitir tela
+              </button>
             </div>
           )}
         </div>
@@ -970,10 +975,6 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
         isMicOn={session.isMicOn}
         isDeafened={session.isDeafened}
         onMic={() => {
-          if (!isSecureMediaContext() || isInAppBrowser()) {
-            window.open(httpsAppUrl(), "_blank", "noopener,noreferrer");
-            return;
-          }
           session.unlockAudio();
           void session.toggleMic();
         }}
@@ -1136,10 +1137,6 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
           <ControlButton
             label="Microfone"
             onClick={() => {
-              if (!isSecureMediaContext() || isInAppBrowser()) {
-                window.location.assign(httpsAppUrl());
-                return;
-              }
               session.unlockAudio();
               void session.toggleMic();
             }}
