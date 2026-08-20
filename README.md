@@ -1,36 +1,168 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sistema de Análise de Partidas — BETA
 
-## Getting Started
+BETA funcional para organizações de Free Fire validarem o fluxo completo de análise de partidas, com simulação de Discord, códigos de acesso, sala de transmissão via WebRTC e painel administrativo.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router)
+- **React + TypeScript**
+- **Tailwind CSS**
+- **PostgreSQL + Prisma ORM**
+- **Socket.IO** (sinalização WebRTC e presença em tempo real)
+- **WebRTC** (`getDisplayMedia` para compartilhamento de tela)
+
+## Arquitetura
+
+```text
+src/
+├── app/                  # Páginas e API Routes
+│   ├── discord/          # Simulação do canal Discord
+│   ├── analise/          # Entrada por código + sala
+│   └── admin/            # Painel da ORG
+├── components/           # UI e sala de análise
+├── hooks/                # Socket.IO e WebRTC
+├── lib/                  # Regras de negócio, Prisma, sessão BETA
+└── server/               # Handlers Socket.IO
+
+server.ts                 # Servidor customizado (Next.js + Socket.IO)
+prisma/                   # Schema, migrations e seed
+```
+
+## Pré-requisitos
+
+- Node.js 20+
+- Docker (para PostgreSQL) **ou** PostgreSQL local
+- Dois navegadores/janelas anônimas para testar Ygor + Pedro
+
+## Instalação
+
+### 1. Clonar e instalar dependências
+
+```bash
+npm install
+```
+
+### 2. Configurar variáveis de ambiente
+
+```bash
+cp .env.example .env
+```
+
+Edite `.env` se necessário. O padrão usa PostgreSQL em `localhost:5432`.
+
+### 3. Subir o banco de dados
+
+```bash
+docker compose up -d
+```
+
+### 4. Criar tabelas e popular dados
+
+```bash
+npm run db:setup
+```
+
+Isso executa `prisma db push` e o seed com:
+
+- Organização **TOKIO**
+- Jogadores **Ygor** e **Pedro**
+- Partida **#159** finalizada
+- Análise pronta com código **PD51X** para Pedro
+- Análises extras para o painel admin (#158, #157)
+
+### 5. Iniciar o servidor
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Acesse: **http://localhost:3000**
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> O BETA usa um servidor customizado (`server.ts`) que roda Next.js e Socket.IO na mesma porta.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Como testar o fluxo completo
 
-## Learn More
+### Passo 1 — Ygor solicita análise
 
-To learn more about Next.js, take a look at the following resources:
+1. Abra http://localhost:3000
+2. Clique em **Entrar como Ygor**
+3. Vá para `/discord`
+4. Se a análise ainda não existir, clique em **Solicitar análise**
+5. Clique em **Entrar na análise** (aguarde Pedro entrar depois)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Passo 2 — Pedro entra com código
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Abra uma **janela anônima**
+2. Entre como **Pedro**
+3. Veja o código `PD51X` no painel de mensagens privadas (simulado)
+4. Vá para `/analise`, informe o código e entre na sala
 
-## Deploy on Vercel
+### Passo 3 — Transmissão de tela
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Na sala `/analise/[id]`, Pedro clica em **Compartilhar minha tela**
+2. Ygor visualiza a transmissão na mesma sala (outra janela)
+3. Ygor pode **Encerrar análise**
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Passo 4 — Resultado no admin
+
+1. Entre como **Administrador**
+2. Acesse `/admin` → clique na análise #159
+3. Registre o resultado: **Aprovado**, **Irregularidade** ou **Cancelada**
+4. Veja o histórico completo de eventos
+
+## Rotas principais
+
+| Rota | Descrição |
+|------|-----------|
+| `/` | Seletor BETA (Ygor / Pedro / Admin) |
+| `/discord` | Simulação do canal Discord pós-partida |
+| `/analise` | Validação de código de acesso |
+| `/analise/[id]` | Sala de análise com WebRTC |
+| `/admin` | Dashboard da organização |
+| `/admin/[id]` | Detalhes, histórico e resultado |
+
+## Estados da análise
+
+`PENDENTE` → `AGUARDANDO_PARTICIPANTE` → `AGUARDANDO_ANALISTA` → `SALA_ATIVA` → `TRANSMISSAO_ATIVA` → `FINALIZADA`
+
+Também: `CANCELADA`, `EXPIRADA`, `IRREGULARIDADE`
+
+## Segurança (BETA)
+
+- Códigos únicos de 5 caracteres com validade configurável
+- Código do analisado vinculado ao jogador correto
+- Acesso à sala exige sessão BETA + token registrado no Socket.IO
+- Link direto `/analise/[id]` redireciona sem acesso válido
+- Códigos expiram e análises encerradas bloqueiam reentrada
+
+## Fora do escopo deste BETA
+
+- Pagamentos e apostas reais
+- Integração real com Discord
+- Gravação de vídeo
+- Autenticação completa
+- App mobile
+
+## Scripts úteis
+
+```bash
+npm run dev          # Servidor de desenvolvimento
+npm run build        # Build de produção
+npm run db:generate  # Gerar Prisma Client
+npm run db:push      # Sincronizar schema
+npm run db:seed      # Popular banco
+npm run db:setup     # Push + seed
+```
+
+## Evolução futura
+
+A arquitetura separa:
+
+- **Regras de negócio** (`src/lib/analysis.ts`) — prontas para extração em serviço
+- **Socket.IO** (`src/server/socket.ts`) — substituível por serviço dedicado
+- **Simulação Discord** (`/discord`) — substituível por bot/webhook real
+- **Sessão BETA** (`/api/session`) — substituível por auth OAuth/JWT
+
+---
+
+Desenvolvido como BETA para validação de experiência antes da versão definitiva.

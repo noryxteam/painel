@@ -1,0 +1,195 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  PLAYER
+  ADMIN
+}
+
+enum MatchStatus {
+  PENDENTE
+  EM_ANDAMENTO
+  FINALIZADA
+  CANCELADA
+}
+
+enum AnalysisStatus {
+  PENDENTE
+  AGUARDANDO_PARTICIPANTE
+  AGUARDANDO_ANALISTA
+  SALA_ATIVA
+  TRANSMISSAO_ATIVA
+  FINALIZADA
+  CANCELADA
+  EXPIRADA
+  IRREGULARIDADE
+}
+
+enum AnalysisResult {
+  APROVADO
+  IRREGULARIDADE
+  CANCELADA
+}
+
+enum AnalysisEventType {
+  ANALISE_SOLICITADA
+  SALA_CRIADA
+  SALA_RESERVADA
+  CODIGO_GERADO
+  PARTICIPANTE_ENTROU
+  ANALISTA_ENTROU
+  PARTICIPANTE_SAIU
+  PARTICIPANTE_REMOVIDO
+  TRANSMISSAO_INICIADA
+  TRANSMISSAO_ENCERRADA
+  ANALISE_FINALIZADA
+  ANALISE_CANCELADA
+  IRREGULARIDADE_REGISTRADA
+  RESULTADO_REGISTRADO
+  CODIGO_EXPIRADO
+}
+
+enum RoomStatus {
+  DISPONIVEL
+  AGUARDANDO_PARTICIPANTES
+  EM_ANALISE
+  TRANSMISSAO_ATIVA
+  ENCERRANDO
+  COM_PROBLEMA
+}
+
+enum RoomParticipantRole {
+  TARGET
+  REQUESTER
+  ADMIN
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  users    User[]
+  matches  Match[]
+  analyses Analysis[]
+  rooms    AnalysisRoom[]
+}
+
+model User {
+  id             String   @id @default(cuid())
+  name           String
+  role           UserRole @default(PLAYER)
+  organizationId String
+  createdAt      DateTime @default(now())
+
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  matchesAsPlayerOne Match[]      @relation("PlayerOne")
+  matchesAsPlayerTwo Match[]      @relation("PlayerTwo")
+  requestedAnalyses  Analysis[]   @relation("Requester")
+  targetedAnalyses   Analysis[]   @relation("Target")
+  analysisEvents     AnalysisEvent[]
+  roomParticipations RoomParticipant[]
+}
+
+model Match {
+  id             String      @id @default(cuid())
+  matchNumber    Int
+  organizationId String
+  playerOneId    String
+  playerTwoId    String
+  style          String?
+  value          String?
+  status         MatchStatus @default(PENDENTE)
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  playerOne    User         @relation("PlayerOne", fields: [playerOneId], references: [id])
+  playerTwo    User         @relation("PlayerTwo", fields: [playerTwoId], references: [id])
+  analyses     Analysis[]
+
+  @@unique([organizationId, matchNumber])
+}
+
+model Analysis {
+  id               String          @id @default(cuid())
+  matchId          String
+  organizationId   String
+  requesterId      String
+  targetUserId     String
+  status           AnalysisStatus  @default(PENDENTE)
+  requesterCode    String          @unique
+  targetCode       String          @unique
+  targetCodeUsed   Boolean         @default(false)
+  targetCodeUsedAt DateTime?
+  codeExpiresAt    DateTime
+  startedAt        DateTime?
+  endedAt          DateTime?
+  result           AnalysisResult?
+  resultBy         String?
+  resultAt         DateTime?
+  createdAt        DateTime        @default(now())
+  roomId           String?
+
+  match          Match            @relation(fields: [matchId], references: [id])
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  requester      User             @relation("Requester", fields: [requesterId], references: [id])
+  targetUser     User             @relation("Target", fields: [targetUserId], references: [id])
+  events         AnalysisEvent[]
+  room           AnalysisRoom?    @relation("AssignedRoom", fields: [roomId], references: [id])
+  occupyingRoom  AnalysisRoom?    @relation("CurrentOccupation")
+}
+
+model AnalysisRoom {
+  id                String     @id @default(cuid())
+  name              String
+  number            Int
+  organizationId    String
+  status            RoomStatus @default(DISPONIVEL)
+  maxParticipants   Int        @default(10)
+  currentAnalysisId String?    @unique
+  occupiedAt        DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  currentAnalysis Analysis?        @relation("CurrentOccupation", fields: [currentAnalysisId], references: [id], onDelete: SetNull)
+  analyses        Analysis[]       @relation("AssignedRoom")
+  participants    RoomParticipant[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+}
+
+model RoomParticipant {
+  id                 String              @id @default(cuid())
+  roomId             String
+  userId             String
+  role               RoomParticipantRole
+  microphoneEnabled  Boolean             @default(false)
+  screenSharing      Boolean             @default(false)
+  joinedAt           DateTime            @default(now())
+  leftAt             DateTime?
+
+  room AnalysisRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, leftAt])
+}
+
+model AnalysisEvent {
+  id         String            @id @default(cuid())
+  analysisId String
+  type       AnalysisEventType
+  userId     String?
+  metadata   Json?
+  createdAt  DateTime          @default(now())
+
+  analysis Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id])
+}

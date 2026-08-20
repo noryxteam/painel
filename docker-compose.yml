@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sap
+      POSTGRES_PASSWORD: sap123
+      POSTGRES_DB: sap_beta
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/data
+
+volumes:
+  postgres_data:
