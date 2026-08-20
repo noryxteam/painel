@@ -577,10 +577,8 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     connected,
   });
 
-  const startedMic = useRef(false);
   useEffect(() => {
     setIdle(!room.id);
-    startedMic.current = false;
   }, [room.id]);
 
   useEffect(() => {
@@ -618,6 +616,9 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   };
 
   const enterRoom = (item: SidebarRoom) => {
+    leavingRef.current = false;
+    session.unlockAudio();
+    void session.enableMic();
     if (item.id === room.id && !idle) {
       setIsFullscreen(true);
       showChrome(isMobile ? 30_000 : 2_000);
@@ -625,7 +626,7 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     }
     leavingRef.current = false;
     if (room.id && !idle && room.id !== item.id) {
-      session.leaveRoom();
+      session.leaveRoom({ keepMic: true });
       void fetch(`/api/rooms/${room.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -649,10 +650,16 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
   };
 
   useEffect(() => {
-    if (idle || !session.joined || startedMic.current) return;
-    startedMic.current = true;
-    void session.toggleMic();
-  }, [idle, session.joined, session.toggleMic]);
+    if (idle || !session.joined) return;
+    void navigator.permissions
+      ?.query({ name: "microphone" as PermissionName })
+      .then((status) => {
+        if (status.state === "granted" && !session.isMicOn) {
+          void session.enableMic();
+        }
+      })
+      .catch(() => undefined);
+  }, [idle, session.joined, session.enableMic, session.isMicOn]);
 
   const inCall = !idle && Boolean(room.id);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
@@ -887,24 +894,47 @@ export function VoiceRoom({ room: startRoom, access, userName, initialRooms }: V
     showChrome(2_000);
   };
 
-  if (session.error) {
-    return (
-      <div className="flex h-dvh items-center justify-center bg-[#111214] text-red-300">
-        {session.error}
-      </div>
-    );
-  }
-
   return (
     <div
       ref={shellRef}
       className={cn(
-        "flex min-h-0 min-w-0 max-w-full overflow-hidden bg-[#111214] text-zinc-100",
+        "relative flex min-h-0 min-w-0 max-w-full overflow-hidden bg-[#111214] text-zinc-100",
         isFullscreen ? "fixed inset-0 z-50 h-dvh w-screen" : "flex-1",
         isFullscreen && !chromeVisible && !isMobile && "cursor-none",
       )}
       onClick={onSurfaceClick}
     >
+      {(session.micHint || session.error) && (
+        <div className="absolute inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex flex-col items-center gap-2">
+          {session.error && (
+            <div className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-red-200 ring-1 ring-red-500/30">
+              <p>{session.error}</p>
+              <button
+                type="button"
+                className="mt-2 text-xs font-medium text-white underline"
+                onClick={() => session.clearError()}
+              >
+                Fechar
+              </button>
+            </div>
+          )}
+          {session.micHint && (
+            <div className="w-full max-w-md rounded-xl bg-black/80 px-4 py-3 text-center text-sm text-amber-100 ring-1 ring-amber-400/30">
+              <p>{session.micHint}</p>
+              <button
+                type="button"
+                className="mt-2 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black"
+                onClick={() => {
+                  session.unlockAudio();
+                  void session.enableMic();
+                }}
+              >
+                Ativar microfone
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {!isFullscreen && (
       <RoomSidebar
         currentId={inCall ? room.id : ""}

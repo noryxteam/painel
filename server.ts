@@ -1,11 +1,18 @@
 import "dotenv/config";
-import { createServer } from "http";
+import { existsSync, readFileSync } from "fs";
+import { createServer as createHttpServer } from "http";
+import { createServer as createHttpsServer } from "https";
 import next from "next";
 import { parse } from "url";
 import { initSocketServer } from "./src/server/socket";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT ?? 3001);
+const certPath = process.env.SSL_CERT ?? "";
+const keyPath = process.env.SSL_KEY ?? "";
+const useHttps = Boolean(
+  certPath && keyPath && existsSync(certPath) && existsSync(keyPath),
+);
 
 const app = next({ dev, hostname: "localhost", port });
 const handle = app.getRequestHandler();
@@ -15,15 +22,29 @@ process.on("unhandledRejection", (reason) => {
 });
 
 app.prepare().then(() => {
-  const server = createServer((req, res) => {
+  const onRequest = (
+    req: import("http").IncomingMessage,
+    res: import("http").ServerResponse,
+  ) => {
     const origin = req.headers.origin;
     if (origin) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
     }
+    res.setHeader(
+      "Permissions-Policy",
+      "microphone=(self), camera=(self), display-capture=(self)",
+    );
     const parsedUrl = parse(req.url ?? "", true);
     handle(req, res, parsedUrl);
-  });
+  };
+
+  const server = useHttps
+    ? createHttpsServer(
+        { cert: readFileSync(certPath), key: readFileSync(keyPath) },
+        onRequest,
+      )
+    : createHttpServer(onRequest);
 
   initSocketServer(server);
 
@@ -33,6 +54,7 @@ app.prepare().then(() => {
   });
 
   server.listen(port, "0.0.0.0", () => {
-    console.log(`> SAP BETA pronto em http://0.0.0.0:${port}`);
+    const protocol = useHttps ? "https" : "http";
+    console.log(`> SAP BETA pronto em ${protocol}://0.0.0.0:${port}`);
   });
 });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
+import { captureMicrophone, describeMicError } from "@/lib/mic";
 
 export interface RoomParticipant {
   userId: string;
@@ -90,6 +91,7 @@ export function useAnalysisRoom({
   const [status, setStatus] = useState<string>("SALA_ATIVA");
   const [joined, setJoined] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [micHint, setMicHint] = useState<string | null>(null);
   const [removedReason, setRemovedReason] = useState<string | null>(null);
 
   const teardownPeer = useCallback((remoteId: string) => {
@@ -442,46 +444,84 @@ export function useAnalysisRoom({
     [channelId, socket],
   );
 
-  const toggleMic = async () => {
-    if (!socket || isDeafenedRef.current) return;
-    if (audioStreamRef.current) {
-      const next = !isMicOn;
-      audioStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = next;
-      });
-      isMicOnRef.current = next;
-      setIsMicOn(next);
-      if (!next) setIsSpeaking(false);
-      socket.emit("media-state", { analysisId: channelId, micEnabled: next, speaking: false });
-      return;
-    }
-
-    try {
-      const cfg = audioConfigRef.current;
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: cfg.echoCancellation,
-          noiseSuppression: cfg.noiseSuppression,
-          autoGainControl: cfg.autoGainControl,
-          ...(cfg.inputDeviceId ? { deviceId: { exact: cfg.inputDeviceId } } : {}),
-        },
-        video: false,
-      });
-      audioStreamRef.current = stream;
-      isMicOnRef.current = true;
-      setIsMicOn(true);
-      socket.emit("media-state", { analysisId: channelId, micEnabled: true });
-      startSpeakingMonitor(stream);
+  const attachMicToPeers = useCallback(
+    (stream: MediaStream) => {
       for (const [remoteId, slot] of peersRef.current) {
         for (const track of stream.getTracks()) {
-          slot.pc.addTrack(track, stream);
+          if (!slot.pc.getSenders().some((sender) => sender.track === track)) {
+            slot.pc.addTrack(track, stream);
+          }
         }
         void offerTo(remoteId);
       }
+    },
+    [offerTo],
+  );
+
+  const enableMic = useCallback(async () => {
+    if (isDeafenedRef.current) return false;
+    try {
+      const Ctor =
+        window.AudioContext ||
+        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (Ctor) void new Ctor().resume();
     } catch {
-      setError("Microfone indisponível neste BETA");
+      // Alguns browsers bloqueiam AudioContext até o toque; o getUserMedia segue.
     }
-  };
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      isMicOnRef.current = true;
+      setIsMicOn(true);
+      setMicHint(null);
+      socket?.emit("media-state", { analysisId: channelId, micEnabled: true });
+      return true;
+    }
+
+    try {
+      const stream = await captureMicrophone(audioConfigRef.current.inputDeviceId);
+      audioStreamRef.current = stream;
+      isMicOnRef.current = true;
+      setIsMicOn(true);
+      setMicHint(null);
+      socket?.emit("media-state", { analysisId: channelId, micEnabled: true });
+      startSpeakingMonitor(stream);
+      attachMicToPeers(stream);
+      return true;
+    } catch (error) {
+      setMicHint(describeMicError(error));
+      return false;
+    }
+  }, [attachMicToPeers, channelId, socket, startSpeakingMonitor]);
+
+  const toggleMic = useCallback(async () => {
+    if (isDeafenedRef.current) return;
+    if (audioStreamRef.current && isMicOnRef.current) {
+      audioStreamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = false;
+      });
+      isMicOnRef.current = false;
+      setIsMicOn(false);
+      setIsSpeaking(false);
+      socket?.emit("media-state", {
+        analysisId: channelId,
+        micEnabled: false,
+        speaking: false,
+      });
+      return;
+    }
+    await enableMic();
+  }, [channelId, enableMic, socket]);
+
+  const unlockAudio = useCallback(() => {
+    for (const slot of peersRef.current.values()) {
+      void slot.audioEl.play().catch(() => undefined);
+    }
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const startScreenShare = async () => {
     if (!canShareScreen || !socket) return;
@@ -532,11 +572,16 @@ export function useAnalysisRoom({
     socket?.emit("screen-share-stop", { analysisId: channelId });
   };
 
-  const leaveRoom = () => {
+  const leaveRoom = (options?: { keepMic?: boolean }) => {
     socket?.emit("leave-room", { analysisId: channelId });
-    audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+    if (!options?.keepMic) {
+      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+      setIsMicOn(false);
+      isMicOnRef.current = false;
+      setMicHint(null);
+    }
     screenStreamRef.current?.getTracks().forEach((track) => track.stop());
-    audioStreamRef.current = null;
     screenStreamRef.current = null;
     teardownAllPeers();
     setJoined(false);
@@ -545,8 +590,6 @@ export function useAnalysisRoom({
     setHasRemoteStream(false);
     setRemoteStream(null);
     setIsSpeaking(false);
-    setIsMicOn(false);
-    isMicOnRef.current = false;
   };
 
   const applyRemoteAudio = () => {
@@ -644,10 +687,14 @@ export function useAnalysisRoom({
     status,
     joined,
     error,
+    micHint,
     removedReason,
     startScreenShare,
     stopScreenShare,
+    enableMic,
     toggleMic,
+    unlockAudio,
+    clearError,
     leaveRoom,
     kickParticipant,
     endAnalysis,
