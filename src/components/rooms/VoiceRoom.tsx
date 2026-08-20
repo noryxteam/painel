@@ -129,13 +129,14 @@ interface SidebarRoom {
   maxParticipants: number;
   occupiedAt: string | null;
   organizationId?: string;
-  participants: Array<{ id?: string; userId: string; screenSharing?: boolean }>;
+  participants?: Array<{ id?: string; userId: string; screenSharing?: boolean }>;
 }
 
 function useNow(active: boolean) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(0);
   useEffect(() => {
     if (!active) return;
+    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [active]);
@@ -228,7 +229,9 @@ export function VoiceRoomEntry({
   initialRooms?: SidebarRoom[];
 }) {
   const pathname = usePathname();
-  const startRoom = roomFromPath(pathname, initialRooms);
+  const [mounted, setMounted] = useState(false);
+  const [rooms, setRooms] = useState<SidebarRoom[]>(initialRooms ?? []);
+  const startRoom = roomFromPath(pathname, rooms);
   const access = useMemo(
     () => ({
       roomId: startRoom.id,
@@ -237,17 +240,31 @@ export function VoiceRoomEntry({
         | "REQUESTER"
         | "TARGET"
         | "ADMIN",
-      token: crypto.randomUUID(),
+      token: userId,
     }),
-    [userId, role],
+    [startRoom.id, userId, role],
   );
+
+  useEffect(() => {
+    setMounted(true);
+    void fetch("/api/rooms")
+      .then((res) => (res.ok ? res.json() : { rooms: [] }))
+      .then((data) => {
+        if (Array.isArray(data.rooms)) setRooms(data.rooms);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  if (!mounted) {
+    return <div className="h-dvh bg-[#111214]" />;
+  }
 
   return (
     <VoiceRoom
       room={startRoom}
       access={access}
       userName={userName}
-      initialRooms={initialRooms}
+      initialRooms={rooms}
     />
   );
 }
@@ -301,8 +318,9 @@ function RoomSidebar({
 
   const load = () => {
     void fetch("/api/rooms")
-      .then((res) => res.json())
-      .then((data) => setRooms(data.rooms ?? []));
+      .then((res) => (res.ok ? res.json() : { rooms: [] }))
+      .then((data) => setRooms(Array.isArray(data.rooms) ? data.rooms : []))
+      .catch(() => undefined);
   };
 
   useEffect(() => {
@@ -322,7 +340,7 @@ function RoomSidebar({
   }, [connected, orgId, socket]);
 
   const renderRoom = (item: SidebarRoom) => {
-    const fromApi = item.participants
+    const fromApi = (item.participants ?? [])
       .map((person) => ({
         userId: memberId(person),
         screenSharing: Boolean(person.screenSharing),

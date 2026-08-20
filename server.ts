@@ -5,10 +5,9 @@ import { parse } from "url";
 import { initSocketServer } from "./src/server/socket";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
 
-const app = next({ dev, hostname, port, webpack: true });
+const app = next({ dev, hostname: "localhost", port });
 const handle = app.getRequestHandler();
 
 process.on("unhandledRejection", (reason) => {
@@ -17,6 +16,11 @@ process.on("unhandledRejection", (reason) => {
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+    }
     const parsedUrl = parse(req.url ?? "", true);
     handle(req, res, parsedUrl);
   });

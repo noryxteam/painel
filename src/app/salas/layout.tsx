@@ -1,7 +1,9 @@
-import { VoiceRoomEntry } from "@/components/rooms/VoiceRoom";
-import { listSidebarRooms } from "@/lib/rooms";
+import { VoiceRoomMount } from "@/components/rooms/VoiceRoomMount";
 import { getBetaSession } from "@/lib/session";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
+
+export const dynamic = "force-dynamic";
 
 export default async function SalasLayout({
   children,
@@ -9,7 +11,6 @@ export default async function SalasLayout({
   children: React.ReactNode;
 }) {
   let session = null;
-  let rooms: Awaited<ReturnType<typeof listSidebarRooms>> = [];
 
   try {
     session = await getBetaSession();
@@ -17,22 +18,17 @@ export default async function SalasLayout({
     console.error("getBetaSession", error);
   }
 
-  try {
-    rooms = await listSidebarRooms();
-  } catch (error) {
-    console.error("salas layout rooms", error);
-  }
-
   if (!session) redirect("/api/session/guest");
 
   return (
     <>
-      <VoiceRoomEntry
-        userName={session.userName}
-        userId={session.userId}
-        role={session.role}
-        initialRooms={rooms}
-      />
+      <Suspense fallback={<div className="h-dvh bg-[#111214]" />}>
+        <VoiceRoomMount
+          userName={session.userName}
+          userId={session.userId}
+          role={session.role}
+        />
+      </Suspense>
       <div hidden aria-hidden>
         {children}
       </div>
